@@ -1,0 +1,140 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Lyle Cheatem & Steele — Associate Sim</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="root">
+    <header>
+      <div class="title">
+        <div class="logo">Lyle Cheatem & Steele</div>
+        <div class="sub">Detroit, Michigan • Associate Care Interface</div>
+      </div>
+      <div class="meta">
+        <div id="clock"></div>
+        <div id="rank"></div>
+      </div>
+    </header>
+
+    <main>
+      <section class="panel left">
+        <h2>Associate</h2>
+
+        <canvas id="scene" width="420" height="300"></canvas>
+
+        <div class="stats">
+          <div class="stat"><span>Hunger</span><div class="bar"><div id="bar-hunger" class="fill"></div></div><span id="val-hunger" class="val"></span></div>
+          <div class="stat"><span>Caffeine</span><div class="bar"><div id="bar-caffeine" class="fill"></div></div><span id="val-caffeine" class="val"></span></div>
+          <div class="stat"><span>Sleep</span><div class="bar"><div id="bar-sleep" class="fill"></div></div><span id="val-sleep" class="val"></span></div>
+          <div class="stat"><span>Stress</span><div class="bar"><div id="bar-stress" class="fill bad"></div></div><span id="val-stress" class="val"></span></div>
+        </div>
+
+        <div class="actions">
+          <h3>Assistant Actions</h3>
+          <div class="grid">
+            <button id="btn-coffee">Refill Coffee Pot</button>
+            <button id="btn-food">Order Takeout</button>
+            <button id="btn-nap">Power Nap</button>
+            <button id="btn-sin">Use “Sin” Pouch</button>
+
+            <button id="btn-probono">Take Pro Bono Task</button>
+            <button id="btn-window">Look Out Window</button>
+            <button id="btn-clean-window">Clean Window</button>
+            <button id="btn-cradle">Newton’s Cradle</button>
+
+            <button id="btn-plant">Water Plant</button>
+            <button id="btn-books">Organize Bookshelf</button>
+            <button id="btn-walkpad">Walking Pad</button>
+            <button id="btn-light">Toggle Banker’s Light</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel mid">
+        <h2>Work</h2>
+
+        <div class="workbox">
+          <div class="row">
+            <div><strong>Points:</strong> <span id="points"></span></div>
+            <div><strong>Billables (lifetime):</strong> <span id="billables"></span></div>
+          </div>
+          <div class="row">
+            <div><strong>Productivity:</strong> <span id="prod"></span></div>
+            <div><strong>PIP Strikes:</strong> <span id="pip"></span></div>
+          </div>
+        </div>
+
+        <h3>Assignment Offers</h3>
+        <div id="offers" class="list"></div>
+
+        <h3>Active Queue</h3>
+        <div id="queue" class="list"></div>
+      </section>
+
+      <section class="panel right">
+        <h2>Company Store</h2>
+        <div class="store">
+          <div class="store-item">
+            <div class="name">Fun Hat</div>
+            <div class="desc">Cosmetic. Slight stress reduction on breaks.</div>
+            <button data-buy="hat">Buy (250)</button>
+          </div>
+          <div class="store-item">
+            <div class="name">New Tie Patterns</div>
+            <div class="desc">Cosmetic. Small rep gain buff.</div>
+            <button data-buy="tie">Buy (200)</button>
+          </div>
+          <div class="store-item">
+            <div class="name">Casual Fridays</div>
+            <div class="desc">On Fridays, passive stress decay improves.</div>
+            <button data-buy="casual">Buy (500)</button>
+          </div>
+          <div class="store-item">
+            <div class="name">Mini-Fridge</div>
+            <div class="desc">Hunger decays slower.</div>
+            <button data-buy="fridge">Buy (800)</button>
+          </div>
+          <div class="store-item">
+            <div class="name">Better Coffee Maker</div>
+            <div class="desc">Caffeine decays slower.</div>
+            <button data-buy="coffeeMaker">Buy (800)</button>
+          </div>
+          <div class="store-item">
+            <div class="name">Standing Desk</div>
+            <div class="desc">Stress rises slower during work.</div>
+            <button data-buy="desk">Buy (900)</button>
+          </div>
+        </div>
+
+        <h2>Reputation</h2>
+        <div class="rep">
+          <div>Litigation: <span id="rep-lit"></span></div>
+          <div>Corporate: <span id="rep-corp"></span></div>
+          <div>Regulatory: <span id="rep-reg"></span></div>
+        </div>
+
+        <h2>Perks</h2>
+        <div class="perks">
+          <label><input type="checkbox" id="perk-nightowl"> Night Owl</label>
+          <label><input type="checkbox" id="perk-masterbiller"> Master Biller</label>
+          <label><input type="checkbox" id="perk-goldenvoice"> Golden Voice</label>
+        </div>
+
+        <h2>Log</h2>
+        <div id="log" class="log"></div>
+      </section>
+    </main>
+
+    <footer>
+      <button id="btn-new">New Game</button>
+      <button id="btn-save">Save</button>
+      <button id="btn-load">Load</button>
+      <span class="hint">Tip: This is real-time. You can check in every ~48 hours and survive—if your choices are sane.</span>
+    </footer>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
