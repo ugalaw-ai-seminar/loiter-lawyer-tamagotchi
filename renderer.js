@@ -1,6 +1,13 @@
 // BigLaw Associate Sim — stable rollback
 // Real-time slow decay (hours/days), assignment queue, billables, rank, events, office interactions.
-// Persistence: localStorage.
+// Persistence: JSON file in user home directory.
+
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
+
+const SAVE_DIR = path.join(os.homedir(), ".biglaw-sim");
+const SAVE_FILE = path.join(SAVE_DIR, "save.json");
 
 const $ = (id) => document.getElementById(id);
 
@@ -117,13 +124,18 @@ function renderLog() {
 }
 
 function save() {
-  localStorage.setItem("biglaw_sim_state", JSON.stringify(state));
-  log("Saved.");
+  try {
+    if (!fs.existsSync(SAVE_DIR)) fs.mkdirSync(SAVE_DIR, { recursive: true });
+    fs.writeFileSync(SAVE_FILE, JSON.stringify(state), "utf-8");
+    log("Saved.");
+  } catch (e) {
+    log("Save failed: " + e.message);
+  }
 }
 function load() {
   try {
-    const raw = localStorage.getItem("biglaw_sim_state");
-    if (!raw) return null;
+    if (!fs.existsSync(SAVE_FILE)) return null;
+    const raw = fs.readFileSync(SAVE_FILE, "utf-8");
     const s = JSON.parse(raw);
     if (!s.stats || !s.lawyer) return null;
     return s;
@@ -840,6 +852,13 @@ function renderAll() {
 }
 
 // ---------- Boot ----------
+function saveSilent() {
+  try {
+    if (!fs.existsSync(SAVE_DIR)) fs.mkdirSync(SAVE_DIR, { recursive: true });
+    fs.writeFileSync(SAVE_FILE, JSON.stringify(state), "utf-8");
+  } catch (_) { /* best effort */ }
+}
+
 function init() {
   seedOffers();
   bindPerks();
@@ -859,6 +878,10 @@ function init() {
   setInterval(() => {
     save();
   }, 1000 * 60 * 3);
+
+  window.addEventListener("beforeunload", () => {
+    saveSilent();
+  });
 }
 
 init();
