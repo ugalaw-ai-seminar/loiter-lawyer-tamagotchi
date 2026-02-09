@@ -215,6 +215,8 @@ $("btn-sin").addEventListener("click", () => {
   log("Used a 'Sin' pouch. Productivity up (6h), but sleep/stress take a hit.");
 });
 
+$("btn-clear-finished").addEventListener("click", () => clearFinishedTasks());
+
 $("btn-probono").addEventListener("click", () => {
   const a = makeAssignment({ kind: "probono" });
   state.queue.push(a);
@@ -372,6 +374,28 @@ function acceptOffer(id) {
   state.queue.push(a);
   state.stats.stress = clamp(state.stats.stress + 2, 0, 100);
   log(`Accepted: ${a.title} (${a.billableHours}h).`);
+}
+
+function clearTask(id) {
+  const idx = state.queue.findIndex(a => a.id === id);
+  if (idx === -1) return;
+  const a = state.queue[idx];
+  if (!a._completed && !a._missed) return;
+  state.queue.splice(idx, 1);
+  log(`Cleared from queue: ${a.title}.`);
+  renderQueue();
+}
+
+function clearFinishedTasks() {
+  const before = state.queue.length;
+  state.queue = state.queue.filter(a => !a._completed && !a._missed);
+  const cleared = before - state.queue.length;
+  if (cleared > 0) {
+    log(`Cleared ${cleared} finished task${cleared > 1 ? "s" : ""} from queue.`);
+  } else {
+    log("No finished tasks to clear.");
+  }
+  renderQueue();
 }
 
 // ---------- Events ----------
@@ -657,14 +681,19 @@ function renderQueue() {
     card.className = "card";
     const dl = new Date(a.deadlineAt).toLocaleString();
     const pct = Math.round(a.progress * 100);
+    const canClear = a._completed || a._missed;
+    const statusLabel = a._completed ? "Done" : (a._missed ? "Missed" : "");
 
     card.innerHTML = `
       <div class="top">
         <div>
-          <div class="name">${a.title}</div>
+          <div class="name">${a.title}${statusLabel ? ` <span class="tag ${a._completed ? "tag-done" : "tag-missed"}">${statusLabel}</span>` : ""}</div>
           <div class="meta">${a.kind.toUpperCase()} • Deadline: ${dl}</div>
         </div>
-        <div class="meta">${pct}%</div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div class="meta">${pct}%</div>
+          ${canClear ? `<button class="btn-clear" data-clear="${a.id}">Clear</button>` : ""}
+        </div>
       </div>
       <div class="mini">
         <div>${Math.floor(a.billablesEarned)}/${a.billableHours}h</div>
@@ -674,6 +703,10 @@ function renderQueue() {
     `;
     wrap.appendChild(card);
   }
+
+  wrap.querySelectorAll("[data-clear]").forEach(btn => {
+    btn.addEventListener("click", () => clearTask(btn.getAttribute("data-clear")));
+  });
 }
 
 // NES-ish procedural office scene
