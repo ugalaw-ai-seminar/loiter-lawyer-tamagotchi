@@ -63,5 +63,40 @@ button:disabled { opacity:0.45; cursor:not-allowed; }
 .log { border:1px solid #252a36; border-radius:10px; background:#0b0c10; padding:10px; height:180px; overflow:auto; font-size:12px; color: var(--muted); }
 .log .entry { margin-bottom:6px; }
 
+/* --- Arc Panels --- */
+.arc-panel { margin-top:14px; }
+.arc-panel h3 { margin:0 0 8px; color: var(--accent); font-size:14px; }
+.arc-hint { color: var(--muted); font-size:11px; margin-bottom:8px; }
+
+/* Junior management cards */
+.junior-card { border:1px solid #252a36; border-radius:10px; background:#10131a; padding:10px; }
+.junior-card .junior-top { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+.junior-card .junior-name { font-weight:650; font-size:13px; color:#6fff9a; }
+.junior-card .junior-task { color: var(--muted); font-size:12px; margin-top:4px; }
+.junior-card .junior-meta { color: var(--muted); font-size:11px; margin-top:4px; display:flex; justify-content:space-between; }
+.btn-delegate { font-size:11px; padding:4px 10px; background:#1a3a2a; border:1px solid #2b5a3a; color:#6fff9a; cursor:pointer; border-radius:6px; }
+.btn-delegate:hover { border-color:#6fff9a; }
+.btn-delegate:disabled { opacity:0.45; cursor:not-allowed; }
+
+/* Rival tug-of-war */
+.rival-header { display:flex; justify-content:space-between; font-size:12px; font-weight:600; color: var(--muted); margin-bottom:4px; }
+.tug-bar-wrap { padding:4px 0; }
+.tug-bar { position:relative; height:18px; border:1px solid #2a3040; border-radius:999px; overflow:hidden; background:#0b0c10; }
+.tug-fill { position:absolute; left:0; top:0; height:100%; width:50%; background: linear-gradient(90deg, #ff6f6f 0%, #6fb3ff 100%); transition: width 0.5s ease; }
+.tug-center { position:absolute; left:50%; top:0; width:2px; height:100%; background:#e8e8e8; transform:translateX(-1px); opacity:0.4; }
+.rival-scores { display:flex; justify-content:space-between; align-items:center; font-size:12px; color: var(--muted); margin-top:2px; }
+.rival-vs { color:#555; font-size:10px; text-transform:uppercase; letter-spacing:1px; }
+#rival-pscore { color:#6fb3ff; font-weight:700; }
+#rival-rscore { color:#ff6f6f; font-weight:700; }
+
+/* Breakaway */
+.breakaway-box { border:1px solid #252a36; border-radius:10px; background:#10131a; padding:12px; }
+.breakaway-info { display:flex; justify-content:space-between; font-size:12px; color: var(--muted); margin-bottom:8px; }
+.breakaway-info strong { color: var(--text); }
+.breakaway-desc { color: var(--muted); font-size:11px; margin-bottom:10px; line-height:1.4; }
+.btn-breakaway { width:100%; padding:10px; background:linear-gradient(135deg, #1a0a2e 0%, #2a1040 50%, #3a1a1a 100%); border:1px solid #6f3aff; color:#cfa5ff; font-weight:700; font-size:13px; cursor:pointer; border-radius:10px; letter-spacing:0.5px; }
+.btn-breakaway:hover { border-color:#a95cff; color:#e8d0ff; background:linear-gradient(135deg, #2a1040 0%, #3a1a50 50%, #4a2a2a 100%); }
+.btn-breakaway:disabled { opacity:0.35; cursor:not-allowed; }
+
 footer { display:flex; gap:10px; align-items:center; padding:10px 12px; border-top:1px solid #252a36; color: var(--muted); font-size:12px; }
 .hint { margin-left:auto; }

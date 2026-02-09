@@ -96,7 +96,37 @@ const defaultState = () => ({
   nextOfferRefreshAt: now() + 1000 * 60 * 60 * 8,
   nextChristmasPartyAt: nextChristmasPartyTimestamp(now()),
 
-  log: []
+  log: [],
+
+  // --- Arc mechanics ---
+
+  // Midlevel: Junior management
+  juniors: [],             // Array of { id, name, task, progress, billableHours, points, deadlineAt, assignedAt, completed, missed }
+  nextJuniorSpawnAt: 0,    // When the next junior associate appears
+
+  // Senior: Rival tug-of-war
+  rival: {
+    name: "",
+    score: 0,              // Rival's accumulated score
+    playerScore: 0,        // Player's tug-of-war score
+    momentum: 0,           // -100 to 100 (negative = rival winning, positive = player winning)
+    lastTrashTalkAt: 0,
+    active: false
+  },
+
+  // Partner: Breakaway / prestige
+  breakaway: {
+    count: 0,              // Number of times player has broken away
+    multiplier: 1.0,       // Permanent multiplier from breakaways
+    lifetimeEarnings: 0    // Total points across all runs (used for multiplier calc)
+  },
+
+  // Work/family choice spiral
+  workChoices: 0,          // Consecutive times player chose work over family
+  familyChoices: 0,        // Consecutive times player chose family over work
+  divorced: false,         // Triggered by sustained work choices
+  burnout: false,          // Triggered by extreme work choices — permanent productivity penalty until recovery
+  burnoutUntil: 0          // Timestamp when burnout wears off
 });
 
 let state = load() || defaultState();
@@ -488,15 +518,70 @@ function clearFinishedTasks() {
 }
 
 // ---------- Events ----------
+
+// Helper: track a work-over-family choice
+function choseWork() {
+  state.workChoices += 1;
+  state.familyChoices = 0;
+  checkWorkSpiral();
+}
+
+// Helper: track a family-over-work choice
+function choseFamily() {
+  state.familyChoices += 1;
+  state.workChoices = 0;
+  // Choosing family during burnout speeds recovery (shave 12 hours off)
+  if (state.burnout && state.burnoutUntil > now()) {
+    state.burnoutUntil -= 1000 * 60 * 60 * 12;
+    log("Choosing family helped. The burnout feels a little lighter.");
+  }
+  checkFamilySpiral();
+}
+
+function checkWorkSpiral() {
+  // Divorce at 5 consecutive work choices
+  if (state.workChoices >= 5 && !state.divorced) {
+    state.divorced = true;
+    state.stats.stress = clamp(state.stats.stress + 25, 0, 100);
+    log("Your spouse filed for divorce. The papers arrived between two billing statements.");
+    log("Stress permanently elevated. Was it worth it?");
+  }
+
+  // Burnout at 8 consecutive work choices (or 4 after divorce)
+  const burnoutThreshold = state.divorced ? 4 : 8;
+  if (state.workChoices >= burnoutThreshold && !state.burnout) {
+    state.burnout = true;
+    state.burnoutUntil = now() + 1000 * 60 * 60 * randInt(48, 96); // 2-4 days
+    state.stats.stress = clamp(state.stats.stress + 20, 0, 100);
+    state.stats.sleep = clamp(state.stats.sleep - 20, 0, 100);
+    log("BURNOUT. You can't focus. You can't sleep. Productivity is tanked until you recover.");
+    log("(Burnout lasts 2-4 days. Choosing family in events will speed recovery.)");
+  }
+}
+
+function checkFamilySpiral() {
+  // PIP strike at 4 consecutive family choices
+  if (state.familyChoices >= 4) {
+    state.pipStrikes += 1;
+    state.familyChoices = 0; // Reset so they can accumulate again
+    log("HR called. Your 'work-life balance' has been noticed. PIP strike issued.");
+    log("The firm doesn't care about your daughter's recital.");
+  }
+}
+
 function triggerRandomEvent() {
+  // Events tagged: "work_family" events track the spiral. "neutral" events don't.
   const events = [
+    // --- Work vs Family events ---
     {
+      type: "work_family",
       name: "Partner email: 'Need this tonight.'",
       a: { label: "Pull all-nighter (points)", effect: () => {
         state.stats.stress = clamp(state.stats.stress + 10, 0, 100);
         state.stats.sleep = clamp(state.stats.sleep - 10, 0, 100);
         state.points += 120;
         log("You chose the all-nighter. Points up, stress/sleep down.");
+        choseWork();
       }},
       b: { label: "Negotiate deadline (safer)", effect: () => {
         state.stats.stress = clamp(state.stats.stress - 6, 0, 100);
@@ -506,34 +591,146 @@ function triggerRandomEvent() {
         } else {
           log("Deadline negotiation worked. Stress down.");
         }
+        choseFamily();
       }}
     },
     {
+      type: "work_family",
       name: "Family conflict: date night vs urgent filing",
       a: { label: "Skip date, file tonight (points)", effect: () => {
         state.stats.stress = clamp(state.stats.stress + 8, 0, 100);
         state.points += 90;
         log("Career choice: more points, more stress.");
+        choseWork();
       }},
       b: { label: "Go on the date (stress down)", effect: () => {
         state.stats.stress = clamp(state.stats.stress - 10, 0, 100);
         log("Family choice: stress down, no points.");
+        choseFamily();
       }}
     },
     {
+      type: "work_family",
       name: "Child sick at childcare: pick up vs push through",
       a: { label: "Push through (points)", effect: () => {
         state.stats.stress = clamp(state.stats.stress + 10, 0, 100);
         state.points += 110;
         log("Pushed through. Points up, stress up.");
+        choseWork();
       }},
       b: { label: "Pick up child (stress down)", effect: () => {
         state.stats.stress = clamp(state.stats.stress - 8, 0, 100);
         state.stats.sleep = clamp(state.stats.sleep + 4, 0, 100);
         log("Picked up child. Stress down; a rare human moment.");
+        choseFamily();
       }}
     },
     {
+      type: "work_family",
+      name: "Your daughter's dance recital is tonight. There's also a client dinner.",
+      a: { label: "Skip the recital, attend the dinner (points + rep)", effect: () => {
+        state.stats.stress = clamp(state.stats.stress + 6, 0, 100);
+        state.points += 100;
+        state.reputation.corp += 5;
+        log("You went to the dinner. The partner was impressed. Your daughter wasn't.");
+        choseWork();
+      }},
+      b: { label: "Go to the recital (stress down)", effect: () => {
+        state.stats.stress = clamp(state.stats.stress - 12, 0, 100);
+        log("You watched her dance. She saw you in the audience and smiled. Stress way down.");
+        choseFamily();
+      }}
+    },
+    {
+      type: "work_family",
+      name: "Your son's baseball game is Saturday. A partner wants you in the office.",
+      a: { label: "Work Saturday (points)", effect: () => {
+        state.stats.stress = clamp(state.stats.stress + 8, 0, 100);
+        state.stats.sleep = clamp(state.stats.sleep - 4, 0, 100);
+        state.points += 95;
+        log("Another Saturday at the office. Your son hit a home run. You heard about it later.");
+        choseWork();
+      }},
+      b: { label: "Go to the game (stress down)", effect: () => {
+        state.stats.stress = clamp(state.stats.stress - 10, 0, 100);
+        state.stats.sleep = clamp(state.stats.sleep + 2, 0, 100);
+        log("You saw the home run. He ran to you after. Sometimes the small things aren't small.");
+        choseFamily();
+      }}
+    },
+    {
+      type: "work_family",
+      name: "Anniversary dinner tonight. But a deal is closing and the partner 'needs bodies.'",
+      a: { label: "Stay for the close (big points)", effect: () => {
+        state.stats.stress = clamp(state.stats.stress + 12, 0, 100);
+        state.points += 140;
+        state.reputation.corp += 4;
+        log("The deal closed at 2 AM. Your spouse ate alone. Again.");
+        choseWork();
+      }},
+      b: { label: "Go to dinner (stress down, risk rep)", effect: () => {
+        state.stats.stress = clamp(state.stats.stress - 14, 0, 100);
+        if (Math.random() < 0.3) {
+          state.reputation.corp = clamp(state.reputation.corp - 4, 0, 9999);
+          log("You went to dinner. The partner noticed your absence. Small rep hit — but your spouse was happy.");
+        } else {
+          log("Dinner was wonderful. Nobody at the firm noticed. A rare win.");
+        }
+        choseFamily();
+      }}
+    },
+    {
+      type: "work_family",
+      name: "Parent-teacher conference conflicts with a deposition prep session.",
+      a: { label: "Skip the conference (points)", effect: () => {
+        state.stats.stress = clamp(state.stats.stress + 6, 0, 100);
+        state.points += 80;
+        log("Depo prep went well. The teacher sent a note home. You didn't read it.");
+        choseWork();
+      }},
+      b: { label: "Attend the conference (stress down)", effect: () => {
+        state.stats.stress = clamp(state.stats.stress - 8, 0, 100);
+        log("The teacher said your kid is doing great. You felt something unfamiliar: pride that isn't billable.");
+        choseFamily();
+      }}
+    },
+    {
+      type: "work_family",
+      name: "Your best friend is in town for one night. There's a brief due tomorrow.",
+      a: { label: "Finish the brief (points)", effect: () => {
+        state.stats.stress = clamp(state.stats.stress + 7, 0, 100);
+        state.points += 85;
+        log("Brief filed on time. Your friend texted 'maybe next time.' That was six months ago.");
+        choseWork();
+      }},
+      b: { label: "Go see your friend (stress down)", effect: () => {
+        state.stats.stress = clamp(state.stats.stress - 10, 0, 100);
+        state.stats.sleep = clamp(state.stats.sleep - 3, 0, 100);
+        log("You stayed out too late laughing. Sleep is down, but you feel human.");
+        choseFamily();
+      }}
+    },
+    {
+      type: "work_family",
+      name: "Thanksgiving. The family expects you home. The partner expects a draft by Friday.",
+      a: { label: "Work through the holiday (big points)", effect: () => {
+        state.stats.stress = clamp(state.stats.stress + 14, 0, 100);
+        state.stats.sleep = clamp(state.stats.sleep - 6, 0, 100);
+        state.points += 150;
+        log("You billed on Thanksgiving. The office was empty except for you and the cleaning crew.");
+        choseWork();
+      }},
+      b: { label: "Go home for Thanksgiving (stress way down)", effect: () => {
+        state.stats.stress = clamp(state.stats.stress - 18, 0, 100);
+        state.stats.hunger = clamp(state.stats.hunger + 20, 0, 100);
+        state.stats.sleep = clamp(state.stats.sleep + 6, 0, 100);
+        log("Mom's cooking. The couch. Football on TV. For one day, you forgot about billables.");
+        choseFamily();
+      }}
+    },
+    // --- Neutral events (no spiral tracking) ---
+    {
+      type: "neutral",
       name: "Water-cooler chat with senior partner",
       a: { label: "Be charming (rep boost)", effect: () => {
         const boost = 10 + (state.lawyer.outfit.tie ? 2 : 0);
@@ -547,12 +744,247 @@ function triggerRandomEvent() {
     }
   ];
 
-  const ev = randChoice(events);
+  // Weight toward work_family events (80%) to make the spiral meaningful
+  const workFamilyEvents = events.filter(e => e.type === "work_family");
+  const neutralEvents = events.filter(e => e.type === "neutral");
+  const pool = Math.random() < 0.8 ? workFamilyEvents : neutralEvents;
+  const ev = randChoice(pool.length > 0 ? pool : events);
+
   const pickA = confirm(`${ev.name}\n\nOK = ${ev.a.label}\nCancel = ${ev.b.label}`);
   if (pickA) ev.a.effect();
   else ev.b.effect();
 
   state.nextEventAt = now() + 1000 * 60 * 60 * randInt(10, 20);
+}
+
+// ---------- Arc helpers ----------
+
+function rankIndex() {
+  const repTotal = state.reputation.lit + state.reputation.corp + state.reputation.reg;
+  let idx = 0;
+  for (let i = 0; i < RANKS.length; i++) {
+    if (state.billables >= RANKS[i].billables && repTotal >= RANKS[i].rep) idx = i;
+  }
+  return idx;
+}
+
+// --- Midlevel: Junior Management ---
+
+const JUNIOR_NAMES = [
+  "Alex Chen", "Jordan Miles", "Priya Patel", "Sam Okafor",
+  "Taylor Webb", "Morgan Reyes", "Casey Kim", "Drew Novak",
+  "Riley Foster", "Quinn Barrett", "Jamie Liu", "Avery Stone"
+];
+
+function spawnJunior() {
+  const kinds = ["lit", "corp", "reg"];
+  const kind = randChoice(kinds);
+  const billableHours = randInt(2, 8);
+  const points = billableHours * randInt(12, 20);
+  const deadlineHours = randInt(24, 120);
+  const names = {
+    lit: ["Draft discovery requests", "Research case law", "Prepare witness outline", "Index exhibits"],
+    corp: ["Organize data room", "Draft ancillary docs", "Review disclosure schedules", "Compile signature pages"],
+    reg: ["Pull agency filings", "Summarize comment letters", "Update compliance tracker", "Draft FOIA request"]
+  };
+
+  return {
+    id: Math.random().toString(36).slice(2),
+    name: randChoice(JUNIOR_NAMES.filter(n => !state.juniors.some(j => j.name === n))) || randChoice(JUNIOR_NAMES),
+    task: randChoice(names[kind]),
+    kind,
+    billableHours,
+    billablesEarned: 0,
+    points,
+    deadlineAt: now() + deadlineHours * 60 * 60 * 1000,
+    assignedAt: now(),
+    progress: 0,
+    completed: false,
+    missed: false,
+    assigned: false  // Player hasn't delegated work yet
+  };
+}
+
+function assignJunior(juniorId) {
+  const j = state.juniors.find(x => x.id === juniorId);
+  if (!j || j.assigned) return;
+  j.assigned = true;
+  j.assignedAt = now();
+  log(`Delegated "${j.task}" to ${j.name}. They're on it.`);
+}
+
+function dismissJunior(juniorId) {
+  const idx = state.juniors.findIndex(x => x.id === juniorId);
+  if (idx === -1) return;
+  const j = state.juniors[idx];
+  if (!j.completed && !j.missed) return;
+  state.juniors.splice(idx, 1);
+}
+
+function tickJuniors(dtHours) {
+  if (rankIndex() < 1) return; // Only midlevel+
+
+  // Spawn juniors periodically (max 3 at a time)
+  const unfinished = state.juniors.filter(j => !j.completed && !j.missed).length;
+  if (now() >= state.nextJuniorSpawnAt && unfinished < 3) {
+    state.juniors.push(spawnJunior());
+    state.nextJuniorSpawnAt = now() + 1000 * 60 * 60 * randInt(8, 18);
+    log("A junior associate is waiting for your direction.");
+  }
+  if (state.nextJuniorSpawnAt === 0) {
+    state.nextJuniorSpawnAt = now() + 1000 * 60 * 60 * randInt(2, 6);
+  }
+
+  for (const j of state.juniors) {
+    if (j.completed || j.missed || !j.assigned) continue;
+
+    // Juniors work at ~60-80% speed with some randomness
+    const juniorSpeed = 0.6 + Math.random() * 0.2;
+    const workDone = juniorSpeed * dtHours;
+    const remaining = j.billableHours - j.billablesEarned;
+    const toAdd = Math.min(remaining, workDone);
+    j.billablesEarned += toAdd;
+    j.progress = clamp(j.billablesEarned / j.billableHours, 0, 1);
+
+    if (now() > j.deadlineAt && j.progress < 1 && !j.missed) {
+      j.missed = true;
+      // No PIP for the player - just a lost opportunity
+      log(`${j.name} missed the deadline on "${j.task}." No bonus this time.`);
+    }
+
+    if (j.progress >= 1 && !j.completed) {
+      j.completed = true;
+      const bonus = Math.round(j.points * state.breakaway.multiplier);
+      state.points += bonus;
+      state.billables += j.billableHours * 0.3; // Partial billable credit for delegation
+      log(`${j.name} completed "${j.task}." Delegation bonus: +${bonus} points.`);
+    }
+  }
+
+  // Auto-clear old finished juniors after 2 hours
+  state.juniors = state.juniors.filter(j =>
+    !(j.completed && now() - j.deadlineAt > 1000 * 60 * 60 * 2) &&
+    !(j.missed && now() - j.deadlineAt > 1000 * 60 * 60 * 2)
+  );
+}
+
+// --- Senior: Rival Tug-of-War ---
+
+const RIVAL_NAMES = [
+  "Sloane Hargrove", "Blaine Whitfield", "Preston Kincaid",
+  "Harper Ellington", "Sterling Cross", "Whitney Aldridge"
+];
+
+const RIVAL_TRASH_TALK = [
+  "just landed a Fortune 500 client. You?",
+  "billed 14 hours yesterday. While golfing.",
+  "was just seen leaving the managing partner's office… smiling.",
+  "got another 'attaboy' email from the exec committee.",
+  "is telling everyone they'll make partner first.",
+  "booked the big conference room for a 'victory lunch.'",
+  "left a copy of their billables report on your chair. Accidentally, of course.",
+  "just asked if you need help 'keeping up.'"
+];
+
+function initRival() {
+  if (state.rival.active) return;
+  state.rival.active = true;
+  state.rival.name = randChoice(RIVAL_NAMES);
+  state.rival.score = 0;
+  state.rival.playerScore = 0;
+  state.rival.momentum = 0;
+  state.rival.lastTrashTalkAt = now();
+  log(`You've been paired against ${state.rival.name} in the race to Counsel. May the best biller win.`);
+}
+
+function tickRival(dtHours) {
+  if (rankIndex() < 2) { // Not senior yet
+    state.rival.active = false;
+    return;
+  }
+  if (rankIndex() > 2) { // Past senior
+    state.rival.active = false;
+    return;
+  }
+  if (!state.rival.active) initRival();
+
+  // Rival accumulates score at a variable rate (semi-random, competitive)
+  const rivalProd = 0.5 + Math.random() * 0.6; // 50-110% effective
+  const rivalBillables = rivalProd * dtHours;
+  const rivalPoints = rivalBillables * randInt(18, 26);
+  state.rival.score += rivalPoints;
+
+  // Player score tracks points earned this tick cycle (accumulated from main tick)
+  // We use a simpler measure: billables * productivity as proxy
+  const prod = productivityMultiplier();
+  const playerWork = prod * dtHours;
+  const playerPoints = playerWork * randInt(20, 28);
+  state.rival.playerScore += playerPoints;
+
+  // Momentum: difference normalized to -100..100
+  const total = state.rival.playerScore + state.rival.score;
+  if (total > 0) {
+    const raw = ((state.rival.playerScore - state.rival.score) / total) * 100;
+    state.rival.momentum = clamp(raw, -100, 100);
+  }
+
+  // Rival trash talk every 12-24 hours
+  if (now() - state.rival.lastTrashTalkAt > 1000 * 60 * 60 * randInt(12, 24)) {
+    state.rival.lastTrashTalkAt = now();
+    log(`${state.rival.name} ${randChoice(RIVAL_TRASH_TALK)}`);
+  }
+
+  // Momentum affects stress slightly
+  if (state.rival.momentum < -30) {
+    state.stats.stress = clamp(state.stats.stress + 0.1 * dtHours, 0, 100);
+  } else if (state.rival.momentum > 30) {
+    state.stats.stress = clamp(state.stats.stress - 0.05 * dtHours, 0, 100);
+  }
+}
+
+// --- Partner: Breakaway / Prestige ---
+
+function calculateBreakawayMultiplier() {
+  // Each breakaway gives a compounding bonus based on lifetime earnings
+  // Formula: 1 + 0.15 * count + log2(1 + lifetimeEarnings / 5000) * 0.1
+  const count = state.breakaway.count;
+  const earnings = state.breakaway.lifetimeEarnings;
+  return 1 + (0.15 * count) + (Math.log2(1 + earnings / 5000) * 0.1);
+}
+
+function canBreakaway() {
+  return rankIndex() >= 4; // Must be Partner
+}
+
+function executeBreakaway() {
+  if (!canBreakaway()) return;
+
+  const oldMultiplier = state.breakaway.multiplier;
+  const oldCount = state.breakaway.count;
+  const totalEarnings = state.breakaway.lifetimeEarnings + state.points;
+
+  // Preserve breakaway data
+  const breakawayData = {
+    count: oldCount + 1,
+    lifetimeEarnings: totalEarnings,
+    multiplier: 1 // recalculated below
+  };
+
+  // Reset to fresh state
+  const fresh = defaultState();
+  fresh.breakaway = breakawayData;
+  fresh.breakaway.multiplier = calculateBreakawayMultiplier.call(null);
+  // Recalculate with the updated breakaway state
+  fresh.breakaway.multiplier = 1 + (0.15 * fresh.breakaway.count) + (Math.log2(1 + fresh.breakaway.lifetimeEarnings / 5000) * 0.1);
+
+  state = fresh;
+  seedOffers(true);
+
+  log(`BREAKAWAY #${state.breakaway.count}! You've left the firm to start your own practice.`);
+  log(`Everything resets, but your experience gives you a ${Math.round((state.breakaway.multiplier - 1) * 100)}% permanent bonus.`);
+  log("Back to Junior Associate — but this time, you know the game.");
+
+  renderAll();
 }
 
 // ---------- Simulation ----------
@@ -573,6 +1005,9 @@ function productivityMultiplier() {
   if (state._sinUntil && state._sinUntil > now()) mult *= 1.12;
   if (state.office.bookshelfBuffUntil > now()) mult *= 1.08;
   if (state.lawyer.outfit.casualFridays && isFriday(now())) mult *= 1.04;
+
+  // Burnout: massive productivity penalty
+  if (state.burnout && state.burnoutUntil > now()) mult *= 0.35;
 
   return mult;
 }
@@ -596,10 +1031,25 @@ function tick(dtMs) {
 
   if (state.office.walkingPadOn) state.stats.stress = clamp(state.stats.stress - 0.35 * dtHours, 0, 100);
 
+  // Divorce: stress floor at 25 (can never fully relax)
+  if (state.divorced && state.stats.stress < 25) {
+    state.stats.stress = 25;
+  }
+
+  // Burnout recovery check
+  if (state.burnout && state.burnoutUntil > 0 && now() >= state.burnoutUntil) {
+    state.burnout = false;
+    state.burnoutUntil = 0;
+    log("The fog is lifting. Burnout is fading. Productivity restored.");
+  }
+
   const workload = state.queue.length;
   let stressRise = (0.22 + workload * 0.08) * dtHours;
   if (state.store.desk) stressRise *= 0.78;
   if (state.lawyer.outfit.casualFridays && isFriday(now())) stressRise *= 0.9;
+
+  // Divorced: +40% passive stress rise
+  if (state.divorced) stressRise *= 1.4;
 
   state.stats.stress = clamp(state.stats.stress + stressRise, 0, 100);
 
@@ -609,7 +1059,7 @@ function tick(dtMs) {
     if (a.progress >= 1) continue;
 
     const workHoursThisTick = prod * dtHours;
-    const billableGainMult = state.perks.masterBiller ? 1.12 : 1.0;
+    const billableGainMult = (state.perks.masterBiller ? 1.12 : 1.0) * state.breakaway.multiplier;
 
     const remainingBillables = a.billableHours - a.billablesEarned;
     const billablesToAdd = Math.min(remainingBillables, workHoursThisTick * billableGainMult);
@@ -630,7 +1080,8 @@ function tick(dtMs) {
     if (a.progress >= 1 && !a._completed) {
       a._completed = true;
 
-      state.points += a.points;
+      const earnedPoints = Math.round(a.points * state.breakaway.multiplier);
+      state.points += earnedPoints;
 
       state.stats.stress = clamp(state.stats.stress + (a.stressImpact * 0.2), 0, 100);
       if (a.kind === "probono") state.stats.stress = clamp(state.stats.stress - 10, 0, 100);
@@ -638,13 +1089,14 @@ function tick(dtMs) {
       let repGain = Math.max(4, Math.round(a.billableHours * 1.2));
       if (state.perks.goldenVoice && a.kind === "lit") repGain = Math.round(repGain * 1.25);
       if (state.lawyer.outfit.tie) repGain += 1;
+      repGain = Math.round(repGain * state.breakaway.multiplier);
 
       if (a.kind === "lit") state.reputation.lit += repGain;
       if (a.kind === "corp") state.reputation.corp += repGain;
       if (a.kind === "reg") state.reputation.reg += repGain;
       if (a.kind === "probono") state.reputation.reg += 2;
 
-      log(`Completed: ${a.title}. +${a.points} points, +rep.`);
+      log(`Completed: ${a.title}. +${earnedPoints} points, +rep.`);
     }
   }
 
@@ -659,6 +1111,10 @@ function tick(dtMs) {
     log("Office Christmas party (Thursday before Christmas). Stress melts away—for one night.");
     state.nextChristmasPartyAt = nextChristmasPartyTimestamp(now());
   }
+
+  // Arc ticks
+  tickJuniors(dtHours);
+  tickRival(dtHours);
 
   if (state.pipStrikes >= 3) {
     state.dismissed = true;
@@ -678,12 +1134,7 @@ function tick(dtMs) {
 }
 
 function rankName() {
-  const repTotal = state.reputation.lit + state.reputation.corp + state.reputation.reg;
-  let current = RANKS[0].name;
-  for (const r of RANKS) {
-    if (state.billables >= r.billables && repTotal >= r.rep) current = r.name;
-  }
-  return current;
+  return RANKS[rankIndex()].name;
 }
 
 // ---------- Rendering ----------
@@ -710,13 +1161,17 @@ function renderStats() {
   $("pip").textContent = state.pipStrikes.toString();
 
   const prod = productivityMultiplier();
-  $("prod").textContent = `${Math.round(prod * 100)}%`;
+  const prodLabel = state.breakaway.multiplier > 1
+    ? `${Math.round(prod * 100)}% (${state.breakaway.multiplier.toFixed(2)}x prestige)`
+    : `${Math.round(prod * 100)}%`;
+  $("prod").textContent = prodLabel;
 
   $("rep-lit").textContent = Math.floor(state.reputation.lit);
   $("rep-corp").textContent = Math.floor(state.reputation.corp);
   $("rep-reg").textContent = Math.floor(state.reputation.reg);
 
-  $("rank").textContent = `Rank: ${rankName()}${state.dismissed ? " — DISMISSED" : ""}`;
+  const rankSuffix = state.dismissed ? " — DISMISSED" : (state.breakaway.count > 0 ? ` (Run #${state.breakaway.count + 1})` : "");
+  $("rank").textContent = `Rank: ${rankName()}${rankSuffix}`;
 }
 
 function renderClock() {
@@ -964,12 +1419,131 @@ function drawScene() {
   ctx.fillText("DESK", 240, 202);
 }
 
+// ---------- Arc Rendering ----------
+
+function renderJuniors() {
+  const panel = $("arc-juniors");
+  const ri = rankIndex();
+  if (ri < 1) { panel.style.display = "none"; return; }
+  panel.style.display = "";
+
+  const wrap = $("junior-list");
+  wrap.innerHTML = "";
+
+  if (state.juniors.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "junior-card";
+    empty.innerHTML = '<div class="junior-task">No juniors available right now. Check back soon.</div>';
+    wrap.appendChild(empty);
+    return;
+  }
+
+  for (const j of state.juniors) {
+    const card = document.createElement("div");
+    card.className = "junior-card";
+    const pct = Math.round(j.progress * 100);
+    const dl = new Date(j.deadlineAt).toLocaleString();
+    const statusTag = j.completed
+      ? ' <span class="tag tag-done">Done</span>'
+      : j.missed
+        ? ' <span class="tag tag-missed">Missed</span>'
+        : !j.assigned
+          ? ' <span class="tag" style="background:#1a2a3a;color:#6fb3ff;border:1px solid #2b4a6a">Awaiting</span>'
+          : "";
+
+    card.innerHTML = `
+      <div class="junior-top">
+        <div class="junior-name">${j.name}${statusTag}</div>
+        ${!j.assigned && !j.completed && !j.missed
+          ? `<button class="btn-delegate" data-delegate="${j.id}">Delegate</button>`
+          : !j.completed && !j.missed && j.assigned
+            ? `<div style="color:var(--muted);font-size:11px">${pct}%</div>`
+            : j.completed || j.missed
+              ? `<button class="btn-clear" data-dismiss-junior="${j.id}">Clear</button>`
+              : ""
+        }
+      </div>
+      <div class="junior-task">${j.task} (${j.kind.toUpperCase()})</div>
+      <div class="junior-meta">
+        <span>${j.billableHours}h • +${j.points} pts bonus</span>
+        <span>Due: ${dl}</span>
+      </div>
+      ${j.assigned && !j.completed && !j.missed
+        ? `<div class="progress"><div class="pfill" style="width:${pct}%"></div></div>`
+        : ""
+      }
+    `;
+    wrap.appendChild(card);
+  }
+
+  wrap.querySelectorAll("[data-delegate]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      assignJunior(btn.getAttribute("data-delegate"));
+      renderJuniors();
+    });
+  });
+  wrap.querySelectorAll("[data-dismiss-junior]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      dismissJunior(btn.getAttribute("data-dismiss-junior"));
+      renderJuniors();
+    });
+  });
+}
+
+function renderRival() {
+  const panel = $("arc-rival");
+  if (rankIndex() !== 2 || !state.rival.active) {
+    panel.style.display = "none";
+    return;
+  }
+  panel.style.display = "";
+
+  $("rival-name-label").textContent = state.rival.name;
+  $("rival-pscore").textContent = Math.floor(state.rival.playerScore);
+  $("rival-rscore").textContent = Math.floor(state.rival.score);
+
+  // Tug fill: 0% = rival winning fully, 50% = tied, 100% = player winning fully
+  const fillPct = clamp(50 + state.rival.momentum / 2, 0, 100);
+  $("tug-fill").style.width = `${fillPct}%`;
+
+  const status = $("rival-status");
+  if (state.rival.momentum > 40) {
+    status.textContent = "You're pulling ahead. Keep billing.";
+    status.style.color = "#6fff9a";
+  } else if (state.rival.momentum > 10) {
+    status.textContent = "Slight edge — don't let up.";
+    status.style.color = "#6fb3ff";
+  } else if (state.rival.momentum > -10) {
+    status.textContent = "Dead heat. Every hour counts.";
+    status.style.color = "var(--muted)";
+  } else if (state.rival.momentum > -40) {
+    status.textContent = `${state.rival.name} is edging ahead…`;
+    status.style.color = "#f2d98a";
+  } else {
+    status.textContent = `${state.rival.name} is dominating. Bill harder.`;
+    status.style.color = "#ff6f6f";
+  }
+}
+
+function renderBreakaway() {
+  const panel = $("arc-breakaway");
+  if (rankIndex() < 4) { panel.style.display = "none"; return; }
+  panel.style.display = "";
+
+  $("breakaway-count").textContent = state.breakaway.count;
+  $("breakaway-mult").textContent = state.breakaway.multiplier.toFixed(2) + "x";
+  $("breakaway-earnings").textContent = Math.floor(state.breakaway.lifetimeEarnings + state.points);
+}
+
 function renderAll() {
   renderClock();
   renderStats();
   renderOffers();
   renderQueue();
   renderStore();
+  renderJuniors();
+  renderRival();
+  renderBreakaway();
   renderLog();
   drawScene();
 }
@@ -986,6 +1560,31 @@ function init() {
   seedOffers();
   bindPerks();
   loadStoreCatalog();
+
+  // Breakaway button
+  $("btn-breakaway").addEventListener("click", () => {
+    if (!canBreakaway()) return;
+    const confirmed = confirm(
+      "BREAK AWAY?\n\n" +
+      "You'll leave the firm and start your own practice.\n" +
+      "All progress resets to zero — rank, billables, reputation, everything.\n\n" +
+      `But you'll carry a permanent ${Math.round(((1 + 0.15 * (state.breakaway.count + 1) + Math.log2(1 + (state.breakaway.lifetimeEarnings + state.points) / 5000) * 0.1) - 1) * 100)}% bonus into your next run.\n\n` +
+      "Are you sure?"
+    );
+    if (confirmed) executeBreakaway();
+  });
+
+  // Migrate old saves that lack arc fields
+  if (!state.juniors) state.juniors = [];
+  if (!state.nextJuniorSpawnAt) state.nextJuniorSpawnAt = 0;
+  if (!state.rival) state.rival = { name: "", score: 0, playerScore: 0, momentum: 0, lastTrashTalkAt: 0, active: false };
+  if (!state.breakaway) state.breakaway = { count: 0, multiplier: 1.0, lifetimeEarnings: 0 };
+  if (state.workChoices === undefined) state.workChoices = 0;
+  if (state.familyChoices === undefined) state.familyChoices = 0;
+  if (state.divorced === undefined) state.divorced = false;
+  if (state.burnout === undefined) state.burnout = false;
+  if (state.burnoutUntil === undefined) state.burnoutUntil = 0;
+
   renderAll();
 
   setInterval(() => {
