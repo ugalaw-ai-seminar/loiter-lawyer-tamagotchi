@@ -4,9 +4,30 @@
   "main": "main.js",
   "description": "Tamagotchi-like BigLaw associate simulator",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.lylecheatem.associatesim",
+    "productName": "Loiter Lawyer",
+    "files": [
+      "main.js",
+      "renderer.js",
+      "index.html",
+      "style.css"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
   },
   "devDependencies": {
-    "electron": "^30.0.0"
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.3"
   }
 }
