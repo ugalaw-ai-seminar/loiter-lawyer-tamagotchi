@@ -5,6 +5,7 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const storeApi = require("./store-api");
 
 const SAVE_DIR = path.join(os.homedir(), ".biglaw-sim");
 const SAVE_FILE = path.join(SAVE_DIR, "save.json");
@@ -279,32 +280,120 @@ $("btn-light").addEventListener("click", () => {
   log(`Banker’s light ${state.office.bankersLightOn ? "ON" : "OFF"}. (No real effect. It’s the vibe.)`);
 });
 
-// Store buys
-document.querySelectorAll("[data-buy]").forEach(btn => {
-  btn.addEventListener("click", () => buy(btn.getAttribute("data-buy")));
-});
+// ---------- Store (API-backed) ----------
+let storeCatalog = [];
+let storeSource = "loading";
 
-function buy(key) {
-  const costs = {
-    hat: 250, tie: 200, casual: 500,
-    fridge: 800, coffeeMaker: 800, desk: 900
-  };
-  const cost = costs[key];
-  if (state.points < cost) {
+function applyItemEffect(item) {
+  const key = item.id;
+  // Apply known effects to game state
+  if (key === "hat") state.lawyer.outfit.hat = true;
+  else if (key === "tie") state.lawyer.outfit.tie = true;
+  else if (key === "casual") state.lawyer.outfit.casualFridays = true;
+  else if (key === "fridge") state.store.fridge = true;
+  else if (key === "coffeeMaker") state.store.coffeeMaker = true;
+  else if (key === "desk") state.store.desk = true;
+  else if (item.effect && item.effect.target) {
+    // Generic effect path for new API-sourced items (e.g. "store.newItem")
+    const parts = item.effect.target.split(".");
+    let obj = state;
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (!obj[parts[i]]) obj[parts[i]] = {};
+      obj = obj[parts[i]];
+    }
+    obj[parts[parts.length - 1]] = item.effect.value;
+  }
+}
+
+function isItemOwned(item) {
+  const key = item.id;
+  if (key === "hat") return !!state.lawyer.outfit.hat;
+  if (key === "tie") return !!state.lawyer.outfit.tie;
+  if (key === "casual") return !!state.lawyer.outfit.casualFridays;
+  if (key === "fridge") return !!state.store.fridge;
+  if (key === "coffeeMaker") return !!state.store.coffeeMaker;
+  if (key === "desk") return !!state.store.desk;
+  // Generic check for API items
+  if (item.effect && item.effect.target) {
+    const parts = item.effect.target.split(".");
+    let obj = state;
+    for (const p of parts) {
+      if (!obj || obj[p] === undefined) return false;
+      obj = obj[p];
+    }
+    return !!obj;
+  }
+  return false;
+}
+
+function buy(itemId) {
+  const item = storeCatalog.find(i => i.id === itemId);
+  if (!item) return;
+  if (isItemOwned(item)) {
+    log("Already owned.");
+    return;
+  }
+  if (state.points < item.cost) {
     log("Not enough points.");
     return;
   }
-  state.points -= cost;
-
-  if (key === "hat") state.lawyer.outfit.hat = true;
-  if (key === "tie") state.lawyer.outfit.tie = true;
-  if (key === "casual") state.lawyer.outfit.casualFridays = true;
-  if (key === "fridge") state.store.fridge = true;
-  if (key === "coffeeMaker") state.store.coffeeMaker = true;
-  if (key === "desk") state.store.desk = true;
-
-  log(`Purchased: ${key}.`);
+  state.points -= item.cost;
+  applyItemEffect(item);
+  log(`Purchased: ${item.name}.`);
+  storeApi.reportPurchase(item.id, item.cost);
   renderAll();
+}
+
+function renderStore() {
+  const wrap = $("store-items");
+  wrap.innerHTML = "";
+
+  if (storeSource === "loading") {
+    wrap.innerHTML = '<div class="store-status">Loading store catalog…</div>';
+    return;
+  }
+
+  if (storeCatalog.length === 0) {
+    wrap.innerHTML = '<div class="store-status">No items available.</div>';
+    return;
+  }
+
+  for (const item of storeCatalog) {
+    const owned = isItemOwned(item);
+    const div = document.createElement("div");
+    div.className = "store-item" + (owned ? " owned" : "");
+    div.innerHTML = `
+      <div class="name">${item.name}${owned ? ' <span class="tag tag-done">Owned</span>' : ""}</div>
+      <div class="desc">${item.description || ""}</div>
+      <button data-buy="${item.id}" ${owned ? "disabled" : ""}>${owned ? "Owned" : `Buy (${item.cost})`}</button>
+    `;
+    wrap.appendChild(div);
+  }
+
+  if (storeSource === "fallback") {
+    const note = document.createElement("div");
+    note.className = "store-status store-offline";
+    note.textContent = "Offline mode — showing cached catalog.";
+    wrap.appendChild(note);
+  }
+
+  wrap.querySelectorAll("[data-buy]").forEach(btn => {
+    btn.addEventListener("click", () => buy(btn.getAttribute("data-buy")));
+  });
+}
+
+async function loadStoreCatalog() {
+  storeSource = "loading";
+  renderStore();
+  const result = await storeApi.fetchCatalog();
+  storeCatalog = result.items;
+  storeSource = result.source;
+  renderStore();
+}
+
+function refreshStore() {
+  storeApi.invalidateCache();
+  loadStoreCatalog();
 }
 
 // ---------- Assignments ----------
@@ -880,6 +969,7 @@ function renderAll() {
   renderStats();
   renderOffers();
   renderQueue();
+  renderStore();
   renderLog();
   drawScene();
 }
@@ -895,6 +985,7 @@ function saveSilent() {
 function init() {
   seedOffers();
   bindPerks();
+  loadStoreCatalog();
   renderAll();
 
   setInterval(() => {
