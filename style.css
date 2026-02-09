@@ -48,6 +48,13 @@ button:disabled { opacity:0.45; cursor:not-allowed; }
 .btn-clear { font-size:11px; padding:3px 8px; background:#1c2230; border:1px solid #3b4560; color:var(--muted); cursor:pointer; border-radius:6px; }
 .btn-clear:hover { border-color:var(--accent); color:var(--text); }
 
+.api-key-row { display:flex; gap:6px; margin-top:8px; }
+.api-key-row input { flex:1; background:#0b0c10; border:1px solid #2a3040; border-radius:6px; color:var(--text); padding:6px 8px; font-size:12px; font-family:monospace; }
+.api-key-row input::placeholder { color:#4a5068; }
+.api-key-row button { font-size:11px; padding:4px 10px; }
+.api-key-status { font-size:11px; margin-top:6px; color:var(--muted); }
+.api-key-status.connected { color:#6fff9a; }
+
 .store { display:flex; flex-direction:column; gap:10px; }
 .store-item { border:1px solid #252a36; border-radius:10px; background:#10131a; padding:10px; }
 .store-item .name { font-weight:700; font-size:13px; }

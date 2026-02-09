@@ -47,7 +47,8 @@
             <button id="btn-plant">Water Plant</button>
             <button id="btn-books">Organize Bookshelf</button>
             <button id="btn-walkpad">Walking Pad</button>
-            <button id="btn-light">Toggle Banker’s Light</button>
+            <button id="btn-light">Toggle Banker's Light</button>
+            <button id="btn-ai-research" style="display:none">AI Research</button>
           </div>
         </div>
       </section>
@@ -109,6 +110,18 @@
             <div class="desc">Stress rises slower during work.</div>
             <button data-buy="desk">Buy (900)</button>
           </div>
+        </div>
+
+        <h2>Tech Upgrades</h2>
+        <div class="store-item tech-upgrade">
+          <div class="name">AI Research Terminal</div>
+          <div class="desc">Link your AI research assistant. Unlocks the "AI Research" action — boosts assignment progress and eases stress.</div>
+          <div class="api-key-row">
+            <input type="password" id="api-key-input" placeholder="Enter API key…" />
+            <button id="btn-save-key">Save</button>
+            <button id="btn-clear-key">Clear</button>
+          </div>
+          <div id="api-key-status" class="api-key-status">Not connected</div>
         </div>
 
         <h2>Reputation</h2>

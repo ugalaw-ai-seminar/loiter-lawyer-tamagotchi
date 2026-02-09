@@ -132,6 +132,44 @@ function load() {
   }
 }
 
+// ---------- API key management (stored outside game state) ----------
+function getApiKey() { return localStorage.getItem("biglaw_api_key") || ""; }
+function setApiKey(key) { localStorage.setItem("biglaw_api_key", key); }
+function clearApiKey() { localStorage.removeItem("biglaw_api_key"); }
+function hasApiKey() { return !!getApiKey(); }
+
+function renderApiKeyStatus() {
+  const status = $("api-key-status");
+  const btn = $("btn-ai-research");
+  if (hasApiKey()) {
+    const masked = "…" + getApiKey().slice(-4);
+    status.textContent = `Connected (${masked})`;
+    status.className = "api-key-status connected";
+    btn.style.display = "";
+  } else {
+    status.textContent = "Not connected";
+    status.className = "api-key-status";
+    btn.style.display = "none";
+  }
+}
+
+$("btn-save-key").addEventListener("click", () => {
+  const input = $("api-key-input");
+  const key = input.value.trim();
+  if (!key) { log("No API key entered."); return; }
+  setApiKey(key);
+  input.value = "";
+  log("API key saved. AI Research Terminal is now online.");
+  renderApiKeyStatus();
+});
+
+$("btn-clear-key").addEventListener("click", () => {
+  clearApiKey();
+  $("api-key-input").value = "";
+  log("API key cleared. AI Research Terminal offline.");
+  renderApiKeyStatus();
+});
+
 $("btn-save").addEventListener("click", save);
 $("btn-load").addEventListener("click", () => {
   const s = load();
@@ -264,8 +302,81 @@ $("btn-walkpad").addEventListener("click", () => {
 
 $("btn-light").addEventListener("click", () => {
   state.office.bankersLightOn = !state.office.bankersLightOn;
-  log(`Banker’s light ${state.office.bankersLightOn ? "ON" : "OFF"}. (No real effect. It’s the vibe.)`);
+  log(`Banker's light ${state.office.bankersLightOn ? "ON" : "OFF"}. (No real effect. It's the vibe.)`);
 });
+
+// ---------- AI Research ----------
+async function runAiResearch() {
+  if (!hasApiKey()) {
+    log("AI Research Terminal not connected. Add your API key in Tech Upgrades.");
+    return;
+  }
+
+  const active = state.queue.find(a => a.progress < 1 && !a._missed);
+  if (!active) {
+    log("No active assignment to research. Accept one first.");
+    return;
+  }
+
+  if (state._aiResearchCooldownUntil && now() < state._aiResearchCooldownUntil) {
+    const mins = Math.ceil((state._aiResearchCooldownUntil - now()) / (1000 * 60));
+    log(`AI Research Terminal cooling down. Try again in ~${mins} min.`);
+    return;
+  }
+
+  const btn = $("btn-ai-research");
+  btn.disabled = true;
+  btn.textContent = "Researching…";
+  log(`Running AI research for: ${active.title}…`);
+
+  const kindLabels = { lit: "litigation", corp: "corporate", reg: "regulatory", probono: "pro bono" };
+  const prompt = `You are a legal research AI embedded in a BigLaw associate's desktop. In 1-2 sentences, give a brief, witty research insight for an associate working on: "${active.title}" (${kindLabels[active.kind]} matter). Be concise and sound like a helpful but slightly sarcastic legal database.`;
+
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": getApiKey(),
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        max_tokens: 150,
+        messages: [{ role: "user", content: prompt }]
+      })
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `API returned ${res.status}`);
+    }
+
+    const data = await res.json();
+    const insight = data.content?.[0]?.text || "No insight returned.";
+
+    const progressBoost = 0.08 + Math.random() * 0.07;
+    const hoursGained = active.billableHours * progressBoost;
+    active.billablesEarned = Math.min(active.billablesEarned + hoursGained, active.billableHours);
+    active.progress = clamp(active.billablesEarned / active.billableHours, 0, 1);
+    state.billables += hoursGained;
+    state.stats.stress = clamp(state.stats.stress - 4, 0, 100);
+
+    state._aiResearchCooldownUntil = now() + 1000 * 60 * 60 * 2;
+
+    log(`Research memo: ${insight}`);
+    log(`Research boost: ${active.title} +${Math.round(progressBoost * 100)}% progress, stress -4.`);
+  } catch (e) {
+    log(`AI Research error: ${e.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "AI Research";
+    renderAll();
+  }
+}
+
+$("btn-ai-research").addEventListener("click", () => runAiResearch());
 
 // Store buys
 document.querySelectorAll("[data-buy]").forEach(btn => {
@@ -868,6 +979,7 @@ function renderAll() {
   renderStats();
   renderOffers();
   renderQueue();
+  renderApiKeyStatus();
   renderLog();
   drawScene();
 }
