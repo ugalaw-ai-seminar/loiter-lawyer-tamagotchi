@@ -126,7 +126,11 @@ const defaultState = () => ({
   familyChoices: 0,        // Consecutive times player chose family over work
   divorced: false,         // Triggered by sustained work choices
   burnout: false,          // Triggered by extreme work choices — permanent productivity penalty until recovery
-  burnoutUntil: 0          // Timestamp when burnout wears off
+  burnoutUntil: 0,         // Timestamp when burnout wears off
+
+  // NPCs
+  npcs: [],                // Active NPCs in the office { id, name, type, persona, quote, effect, expiresAt, interacted }
+  nextNpcSpawnAt: 0        // When next NPC wanders in
 });
 
 let state = load() || defaultState();
@@ -987,6 +991,273 @@ function executeBreakaway() {
   renderAll();
 }
 
+// --- NPCs ---
+
+function isSummerSeason() {
+  const m = new Date().getMonth(); // 0-indexed: 5=Jun, 6=Jul
+  return m === 5 || m === 6;
+}
+
+// Summer associate archetypes (June-July only)
+const SUMMER_ASSOCIATES = [
+  // Frat-boy types
+  {
+    name: "Chad Buckley",
+    persona: "fratbro",
+    desc: "Summer associate. Polo collar popped. Talks about 'his boys' constantly.",
+    interactions: [
+      { label: "Grab beers after work", effect: { stress: -6, caffeine: -4 }, msg: "Chad insisted on a rooftop bar. You had fun, somehow." },
+      { label: "Ignore him", effect: { stress: -1 }, msg: "Chad finger-gunned at you on his way out. You pretended not to see." }
+    ]
+  },
+  {
+    name: "Tanner Whitmore",
+    persona: "fratbro",
+    desc: "Summer associate. Already networking for a corner office. Wears boat shoes indoors.",
+    interactions: [
+      { label: "Let him buy lunch", effect: { hunger: 20, stress: -3 }, msg: "Tanner put it on his dad's card. The sushi was excellent." },
+      { label: "Decline politely", effect: { stress: -1 }, msg: "Tanner shrugged. 'Your loss, bro.'" }
+    ]
+  },
+  // Nerd types
+  {
+    name: "Priya Subramaniam",
+    persona: "nerd",
+    desc: "Summer associate. Law review. Cites cases from memory. Terrifyingly competent.",
+    interactions: [
+      { label: "Ask for research help", effect: { points: 40, stress: -4 }, msg: "Priya found a case on point in eleven minutes. You pretended you knew about it." },
+      { label: "Nod and move on", effect: { stress: -1 }, msg: "Priya went back to her color-coded outlines." }
+    ]
+  },
+  {
+    name: "Eugene Park",
+    persona: "nerd",
+    desc: "Summer associate. Built a billable-hours tracker in Excel with macros. Has strong opinions about fonts.",
+    interactions: [
+      { label: "Ask about his spreadsheet", effect: { points: 25, stress: -2 }, msg: "Eugene showed you a pivot table that genuinely improved your workflow." },
+      { label: "Avoid the conversation", effect: { stress: -1 }, msg: "Eugene adjusted his glasses and went back to optimizing cell references." }
+    ]
+  },
+  // Normal types
+  {
+    name: "Maria Santos",
+    persona: "normal",
+    desc: "Summer associate. Friendly, sharp, keeps her head down. Everyone likes her.",
+    interactions: [
+      { label: "Grab coffee together", effect: { caffeine: 15, stress: -5 }, msg: "Maria asked good questions about the firm. It was nice to talk to a normal person." },
+      { label: "Wave hello", effect: { stress: -1 }, msg: "Maria smiled and went back to her memo." }
+    ]
+  },
+  {
+    name: "James Okonkwo",
+    persona: "normal",
+    desc: "Summer associate. Former public defender intern. Genuinely wants to help people.",
+    interactions: [
+      { label: "Talk about pro bono work", effect: { stress: -8, repReg: 3 }, msg: "James lit up when you mentioned the clinic. You remembered why you went to law school." },
+      { label: "Just say hi", effect: { stress: -1 }, msg: "James nodded warmly and headed to the library." }
+    ]
+  },
+  // Weirdos
+  {
+    name: "Kessler Vane",
+    persona: "weirdo",
+    desc: "Summer associate. Eats lunch at exactly 11:11 AM every day. Has never been seen blinking.",
+    interactions: [
+      { label: "Ask about the 11:11 thing", effect: { stress: 5 }, msg: "Kessler stared at you for eight seconds, then said: 'Alignment.' You didn't ask again." },
+      { label: "Keep your distance", effect: { stress: -2 }, msg: "Probably wise." }
+    ]
+  },
+  {
+    name: "Daphne Creel",
+    persona: "weirdo",
+    desc: "Summer associate. Left teeth marks on a shared stapler. Claims it 'wasn't her.'",
+    interactions: [
+      { label: "Offer her your stapler", effect: { stress: 4 }, msg: "She accepted without breaking eye contact. Your stapler came back… damp." },
+      { label: "Lock your supplies", effect: { stress: -2 }, msg: "You started locking your desk drawer. The bite marks stopped." }
+    ]
+  },
+  {
+    name: "Morton Filch",
+    persona: "weirdo",
+    desc: "Summer associate. Wears the same brown cardigan daily. Hums in the elevator. Smells faintly of cedar.",
+    interactions: [
+      { label: "Compliment the cardigan", effect: { stress: -3 }, msg: "Morton beamed. 'It was my grandfather's. And his grandfather's.' The math didn't add up, but he seemed happy." },
+      { label: "Take the stairs", effect: { stress: -1, sleep: -2 }, msg: "14 flights. Your knees hurt but at least there was no humming." }
+    ]
+  },
+  {
+    name: "Yuki Tannenbaum",
+    persona: "weirdo",
+    desc: "Summer associate. Keeps a terrarium on her desk with something alive in it. Nobody's sure what.",
+    interactions: [
+      { label: "Peek at the terrarium", effect: { stress: 6 }, msg: "It moved. You made eye contact with it. You wish you hadn't." },
+      { label: "Don't look", effect: { stress: -1 }, msg: "Some things are better left unknown." }
+    ]
+  }
+];
+
+// Year-round office NPCs (Sept–May)
+const OFFICE_NPCS = [
+  // Associates
+  {
+    name: "Rachel Whitfield",
+    persona: "associate",
+    desc: "Third-year associate. Looks exhausted. Has three monitors and a neck pillow at her desk.",
+    interactions: [
+      { label: "Commiserate about hours", effect: { stress: -5 }, msg: "You both stared at the ceiling and sighed in unison. It was oddly therapeutic." },
+      { label: "Nod in passing", effect: { stress: -1 }, msg: "The universal associate greeting: dead eyes, slight head tilt." }
+    ]
+  },
+  {
+    name: "Derek Liu",
+    persona: "associate",
+    desc: "Fifth-year. Hasn't taken a vacation in two years. Somehow still chipper.",
+    interactions: [
+      { label: "Ask his secret", effect: { caffeine: 10, stress: -3 }, msg: "'Cold brew and denial,' he said with a grin that didn't quite reach his eyes." },
+      { label: "Keep walking", effect: { stress: -1 }, msg: "Derek waved. His smile lingered a beat too long." }
+    ]
+  },
+  {
+    name: "Amara Osei",
+    persona: "associate",
+    desc: "Seventh-year. On the cusp of senior. Runs on spite and green tea.",
+    interactions: [
+      { label: "Ask for career advice", effect: { stress: -4, repLit: 3 }, msg: "'Bill hard, don't complain, and never eat fish in the microwave.' Solid advice." },
+      { label: "Let her work", effect: { stress: -1 }, msg: "Amara didn't look up. Respect." }
+    ]
+  },
+  // Partners
+  {
+    name: "Richard Halloway III",
+    persona: "partner",
+    desc: "Equity partner. Corner office. Has a putting green nobody's ever seen him use.",
+    interactions: [
+      { label: "Make small talk", effect: { repCorp: 5, stress: 3 }, msg: "He talked about golf for twelve minutes. You smiled the entire time. Your face hurts." },
+      { label: "Avoid eye contact", effect: { stress: -2 }, msg: "You ducked into the copy room. Safe." }
+    ]
+  },
+  {
+    name: "Barbara Kline",
+    persona: "partner",
+    desc: "Managing partner. Sends emails at 4 AM. Nobody knows when she sleeps.",
+    interactions: [
+      { label: "Reply to her 4 AM email immediately", effect: { points: 50, sleep: -6, stress: 4 }, msg: "She replied in 90 seconds. You're in too deep now." },
+      { label: "Pretend you didn't see it", effect: { stress: -1 }, msg: "She didn't mention it. For now." }
+    ]
+  },
+  // Secretaries / Staff
+  {
+    name: "Linda from Reception",
+    persona: "staff",
+    desc: "Has been here longer than the managing partner. Knows everyone's secrets.",
+    interactions: [
+      { label: "Chat with Linda", effect: { stress: -7 }, msg: "Linda told you which partner is on thin ice. You didn't ask, but you now know." },
+      { label: "Just wave", effect: { stress: -1 }, msg: "Linda waved back. She remembers your birthday. You don't remember hers." }
+    ]
+  },
+  {
+    name: "Denise Kowalski",
+    persona: "staff",
+    desc: "Legal secretary. Formats documents faster than you can read them. Do NOT touch her label maker.",
+    interactions: [
+      { label: "Ask her to fix your formatting", effect: { points: 30, stress: -3 }, msg: "Done in four minutes. She didn't even look at the screen. Witchcraft." },
+      { label: "Try to fix it yourself", effect: { stress: 3 }, msg: "You spent 40 minutes fighting Word. Denise sighed audibly from across the hall." }
+    ]
+  },
+  {
+    name: "Gerald the Mailroom Guy",
+    persona: "staff",
+    desc: "Delivers interoffice mail. Has worked here 30 years. Calls everyone 'chief.'",
+    interactions: [
+      { label: "Shoot the breeze with Gerald", effect: { stress: -6 }, msg: "'Hang in there, chief.' Gerald patted your shoulder. You almost cried." },
+      { label: "Take your mail and go", effect: { stress: -1 }, msg: "'See you tomorrow, chief.' Gerald's the most consistent person in your life." }
+    ]
+  },
+  // Delivery person (tied to ordering food)
+  {
+    name: "Marcus (DoorDash)",
+    persona: "delivery",
+    desc: "Your regular delivery driver. Knows the building code, your floor, and your usual order.",
+    interactions: [
+      { label: "Chat for a minute", effect: { hunger: 15, stress: -5 }, msg: "Marcus asked how you were. He meant it. That hit different at 10 PM." },
+      { label: "Grab the bag and go", effect: { hunger: 15, stress: -1 }, msg: "Marcus shouted 'have a good night!' as the elevator closed. You didn't." }
+    ]
+  },
+  {
+    name: "Soo-Yun (Uber Eats)",
+    persona: "delivery",
+    desc: "Delivers your late-night sushi. Always texts 'enjoy!' with a smiley face.",
+    interactions: [
+      { label: "Tip extra and say thanks", effect: { hunger: 15, stress: -4, points: -5 }, msg: "Soo-Yun grinned. 'You're my favorite customer on this floor.' Small kindnesses." },
+      { label: "Quick handoff", effect: { hunger: 15, stress: -1 }, msg: "Efficient. Professional. Two ships passing at 11 PM." }
+    ]
+  }
+];
+
+function spawnNpc() {
+  const pool = isSummerSeason() ? SUMMER_ASSOCIATES : OFFICE_NPCS;
+
+  // Filter out NPCs already present
+  const activeNames = state.npcs.map(n => n.name);
+  const available = pool.filter(n => !activeNames.includes(n.name));
+  if (available.length === 0) return null;
+
+  const template = randChoice(available);
+  // Pick one interaction pair for this visit
+  const interaction = randChoice(template.interactions);
+
+  return {
+    id: Math.random().toString(36).slice(2),
+    name: template.name,
+    persona: template.persona,
+    desc: template.desc,
+    optA: { label: interaction.label, effect: interaction.effect, msg: interaction.msg },
+    optB: { label: template.interactions.find(i => i !== interaction)?.label || "Ignore", effect: template.interactions.find(i => i !== interaction)?.effect || { stress: -1 }, msg: template.interactions.find(i => i !== interaction)?.msg || "You went about your day." },
+    arrivedAt: now(),
+    expiresAt: now() + 1000 * 60 * 60 * randInt(6, 24), // Leaves after 6-24 hours
+    interacted: false
+  };
+}
+
+function interactNpc(npcId, choice) {
+  const npc = state.npcs.find(n => n.id === npcId);
+  if (!npc || npc.interacted) return;
+  npc.interacted = true;
+
+  const opt = choice === "a" ? npc.optA : npc.optB;
+  const eff = opt.effect;
+
+  if (eff.stress) state.stats.stress = clamp(state.stats.stress + eff.stress, 0, 100);
+  if (eff.caffeine) state.stats.caffeine = clamp(state.stats.caffeine + eff.caffeine, 0, 100);
+  if (eff.hunger) state.stats.hunger = clamp(state.stats.hunger + eff.hunger, 0, 100);
+  if (eff.sleep) state.stats.sleep = clamp(state.stats.sleep + eff.sleep, 0, 100);
+  if (eff.points) state.points += eff.points;
+  if (eff.repLit) state.reputation.lit += eff.repLit;
+  if (eff.repCorp) state.reputation.corp += eff.repCorp;
+  if (eff.repReg) state.reputation.reg += eff.repReg;
+
+  log(opt.msg);
+}
+
+function tickNpcs(dtHours) {
+  // Expire old NPCs
+  state.npcs = state.npcs.filter(n => now() < n.expiresAt);
+
+  // Spawn new NPCs periodically (max 2 at a time)
+  if (now() >= state.nextNpcSpawnAt && state.npcs.length < 2) {
+    const npc = spawnNpc();
+    if (npc) {
+      state.npcs.push(npc);
+      const seasonLabel = isSummerSeason() ? "A summer associate" : (npc.persona === "delivery" ? "A delivery driver" : "Someone");
+      log(`${seasonLabel} stopped by: ${npc.name}.`);
+    }
+    state.nextNpcSpawnAt = now() + 1000 * 60 * 60 * randInt(4, 14);
+  }
+  if (state.nextNpcSpawnAt === 0) {
+    state.nextNpcSpawnAt = now() + 1000 * 60 * 60 * randInt(1, 4);
+  }
+}
+
 // ---------- Simulation ----------
 function productivityMultiplier() {
   const { hunger, caffeine, sleep, stress } = state.stats;
@@ -1115,6 +1386,7 @@ function tick(dtMs) {
   // Arc ticks
   tickJuniors(dtHours);
   tickRival(dtHours);
+  tickNpcs(dtHours);
 
   if (state.pipStrikes >= 3) {
     state.dismissed = true;
@@ -1535,6 +1807,63 @@ function renderBreakaway() {
   $("breakaway-earnings").textContent = Math.floor(state.breakaway.lifetimeEarnings + state.points);
 }
 
+function renderNpcs() {
+  const panel = $("npc-panel");
+  const wrap = $("npc-list");
+  if (state.npcs.length === 0) {
+    panel.style.display = "none";
+    return;
+  }
+  panel.style.display = "";
+  wrap.innerHTML = "";
+
+  const seasonTag = isSummerSeason() ? "Summer" : "Office";
+
+  for (const npc of state.npcs) {
+    const card = document.createElement("div");
+    card.className = "npc-card";
+
+    const personaColors = {
+      fratbro: "#f2d98a", nerd: "#6fb3ff", normal: "#6fff9a", weirdo: "#ff6fb3",
+      associate: "#a9b0bb", partner: "#cfa5ff", staff: "#6fff9a", delivery: "#f2d98a"
+    };
+    const tagColor = personaColors[npc.persona] || "var(--muted)";
+    const personaLabel = {
+      fratbro: "Frat Bro", nerd: "Nerd", normal: "Normal", weirdo: "???",
+      associate: "Associate", partner: "Partner", staff: "Staff", delivery: "Delivery"
+    }[npc.persona] || npc.persona;
+
+    if (npc.interacted) {
+      card.innerHTML = `
+        <div class="npc-top">
+          <div class="npc-name">${npc.name} <span class="tag" style="background:transparent;color:${tagColor};border:1px solid ${tagColor}">${personaLabel}</span></div>
+        </div>
+        <div class="npc-desc" style="opacity:0.5">${npc.desc}</div>
+        <div class="npc-done">Already interacted.</div>
+      `;
+    } else {
+      card.innerHTML = `
+        <div class="npc-top">
+          <div class="npc-name">${npc.name} <span class="tag" style="background:transparent;color:${tagColor};border:1px solid ${tagColor}">${personaLabel}</span></div>
+        </div>
+        <div class="npc-desc">${npc.desc}</div>
+        <div class="npc-actions">
+          <button class="npc-btn" data-npc="${npc.id}" data-choice="a">${npc.optA.label}</button>
+          <button class="npc-btn" data-npc="${npc.id}" data-choice="b">${npc.optB.label}</button>
+        </div>
+      `;
+    }
+    wrap.appendChild(card);
+  }
+
+  wrap.querySelectorAll("[data-npc]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      interactNpc(btn.getAttribute("data-npc"), btn.getAttribute("data-choice"));
+      renderNpcs();
+    });
+  });
+}
+
 function renderAll() {
   renderClock();
   renderStats();
@@ -1544,6 +1873,7 @@ function renderAll() {
   renderJuniors();
   renderRival();
   renderBreakaway();
+  renderNpcs();
   renderLog();
   drawScene();
 }
@@ -1584,6 +1914,8 @@ function init() {
   if (state.divorced === undefined) state.divorced = false;
   if (state.burnout === undefined) state.burnout = false;
   if (state.burnoutUntil === undefined) state.burnoutUntil = 0;
+  if (!state.npcs) state.npcs = [];
+  if (!state.nextNpcSpawnAt) state.nextNpcSpawnAt = 0;
 
   renderAll();
 
