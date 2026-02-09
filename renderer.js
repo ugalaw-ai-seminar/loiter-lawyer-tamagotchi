@@ -119,7 +119,14 @@ const defaultState = () => ({
     count: 0,              // Number of times player has broken away
     multiplier: 1.0,       // Permanent multiplier from breakaways
     lifetimeEarnings: 0    // Total points across all runs (used for multiplier calc)
-  }
+  },
+
+  // Work/family choice spiral
+  workChoices: 0,          // Consecutive times player chose work over family
+  familyChoices: 0,        // Consecutive times player chose family over work
+  divorced: false,         // Triggered by sustained work choices
+  burnout: false,          // Triggered by extreme work choices — permanent productivity penalty until recovery
+  burnoutUntil: 0          // Timestamp when burnout wears off
 });
 
 let state = load() || defaultState();
@@ -511,15 +518,70 @@ function clearFinishedTasks() {
 }
 
 // ---------- Events ----------
+
+// Helper: track a work-over-family choice
+function choseWork() {
+  state.workChoices += 1;
+  state.familyChoices = 0;
+  checkWorkSpiral();
+}
+
+// Helper: track a family-over-work choice
+function choseFamily() {
+  state.familyChoices += 1;
+  state.workChoices = 0;
+  // Choosing family during burnout speeds recovery (shave 12 hours off)
+  if (state.burnout && state.burnoutUntil > now()) {
+    state.burnoutUntil -= 1000 * 60 * 60 * 12;
+    log("Choosing family helped. The burnout feels a little lighter.");
+  }
+  checkFamilySpiral();
+}
+
+function checkWorkSpiral() {
+  // Divorce at 5 consecutive work choices
+  if (state.workChoices >= 5 && !state.divorced) {
+    state.divorced = true;
+    state.stats.stress = clamp(state.stats.stress + 25, 0, 100);
+    log("Your spouse filed for divorce. The papers arrived between two billing statements.");
+    log("Stress permanently elevated. Was it worth it?");
+  }
+
+  // Burnout at 8 consecutive work choices (or 4 after divorce)
+  const burnoutThreshold = state.divorced ? 4 : 8;
+  if (state.workChoices >= burnoutThreshold && !state.burnout) {
+    state.burnout = true;
+    state.burnoutUntil = now() + 1000 * 60 * 60 * randInt(48, 96); // 2-4 days
+    state.stats.stress = clamp(state.stats.stress + 20, 0, 100);
+    state.stats.sleep = clamp(state.stats.sleep - 20, 0, 100);
+    log("BURNOUT. You can't focus. You can't sleep. Productivity is tanked until you recover.");
+    log("(Burnout lasts 2-4 days. Choosing family in events will speed recovery.)");
+  }
+}
+
+function checkFamilySpiral() {
+  // PIP strike at 4 consecutive family choices
+  if (state.familyChoices >= 4) {
+    state.pipStrikes += 1;
+    state.familyChoices = 0; // Reset so they can accumulate again
+    log("HR called. Your 'work-life balance' has been noticed. PIP strike issued.");
+    log("The firm doesn't care about your daughter's recital.");
+  }
+}
+
 function triggerRandomEvent() {
+  // Events tagged: "work_family" events track the spiral. "neutral" events don't.
   const events = [
+    // --- Work vs Family events ---
     {
+      type: "work_family",
       name: "Partner email: 'Need this tonight.'",
       a: { label: "Pull all-nighter (points)", effect: () => {
         state.stats.stress = clamp(state.stats.stress + 10, 0, 100);
         state.stats.sleep = clamp(state.stats.sleep - 10, 0, 100);
         state.points += 120;
         log("You chose the all-nighter. Points up, stress/sleep down.");
+        choseWork();
       }},
       b: { label: "Negotiate deadline (safer)", effect: () => {
         state.stats.stress = clamp(state.stats.stress - 6, 0, 100);
@@ -529,34 +591,146 @@ function triggerRandomEvent() {
         } else {
           log("Deadline negotiation worked. Stress down.");
         }
+        choseFamily();
       }}
     },
     {
+      type: "work_family",
       name: "Family conflict: date night vs urgent filing",
       a: { label: "Skip date, file tonight (points)", effect: () => {
         state.stats.stress = clamp(state.stats.stress + 8, 0, 100);
         state.points += 90;
         log("Career choice: more points, more stress.");
+        choseWork();
       }},
       b: { label: "Go on the date (stress down)", effect: () => {
         state.stats.stress = clamp(state.stats.stress - 10, 0, 100);
         log("Family choice: stress down, no points.");
+        choseFamily();
       }}
     },
     {
+      type: "work_family",
       name: "Child sick at childcare: pick up vs push through",
       a: { label: "Push through (points)", effect: () => {
         state.stats.stress = clamp(state.stats.stress + 10, 0, 100);
         state.points += 110;
         log("Pushed through. Points up, stress up.");
+        choseWork();
       }},
       b: { label: "Pick up child (stress down)", effect: () => {
         state.stats.stress = clamp(state.stats.stress - 8, 0, 100);
         state.stats.sleep = clamp(state.stats.sleep + 4, 0, 100);
         log("Picked up child. Stress down; a rare human moment.");
+        choseFamily();
       }}
     },
     {
+      type: "work_family",
+      name: "Your daughter's dance recital is tonight. There's also a client dinner.",
+      a: { label: "Skip the recital, attend the dinner (points + rep)", effect: () => {
+        state.stats.stress = clamp(state.stats.stress + 6, 0, 100);
+        state.points += 100;
+        state.reputation.corp += 5;
+        log("You went to the dinner. The partner was impressed. Your daughter wasn't.");
+        choseWork();
+      }},
+      b: { label: "Go to the recital (stress down)", effect: () => {
+        state.stats.stress = clamp(state.stats.stress - 12, 0, 100);
+        log("You watched her dance. She saw you in the audience and smiled. Stress way down.");
+        choseFamily();
+      }}
+    },
+    {
+      type: "work_family",
+      name: "Your son's baseball game is Saturday. A partner wants you in the office.",
+      a: { label: "Work Saturday (points)", effect: () => {
+        state.stats.stress = clamp(state.stats.stress + 8, 0, 100);
+        state.stats.sleep = clamp(state.stats.sleep - 4, 0, 100);
+        state.points += 95;
+        log("Another Saturday at the office. Your son hit a home run. You heard about it later.");
+        choseWork();
+      }},
+      b: { label: "Go to the game (stress down)", effect: () => {
+        state.stats.stress = clamp(state.stats.stress - 10, 0, 100);
+        state.stats.sleep = clamp(state.stats.sleep + 2, 0, 100);
+        log("You saw the home run. He ran to you after. Sometimes the small things aren't small.");
+        choseFamily();
+      }}
+    },
+    {
+      type: "work_family",
+      name: "Anniversary dinner tonight. But a deal is closing and the partner 'needs bodies.'",
+      a: { label: "Stay for the close (big points)", effect: () => {
+        state.stats.stress = clamp(state.stats.stress + 12, 0, 100);
+        state.points += 140;
+        state.reputation.corp += 4;
+        log("The deal closed at 2 AM. Your spouse ate alone. Again.");
+        choseWork();
+      }},
+      b: { label: "Go to dinner (stress down, risk rep)", effect: () => {
+        state.stats.stress = clamp(state.stats.stress - 14, 0, 100);
+        if (Math.random() < 0.3) {
+          state.reputation.corp = clamp(state.reputation.corp - 4, 0, 9999);
+          log("You went to dinner. The partner noticed your absence. Small rep hit — but your spouse was happy.");
+        } else {
+          log("Dinner was wonderful. Nobody at the firm noticed. A rare win.");
+        }
+        choseFamily();
+      }}
+    },
+    {
+      type: "work_family",
+      name: "Parent-teacher conference conflicts with a deposition prep session.",
+      a: { label: "Skip the conference (points)", effect: () => {
+        state.stats.stress = clamp(state.stats.stress + 6, 0, 100);
+        state.points += 80;
+        log("Depo prep went well. The teacher sent a note home. You didn't read it.");
+        choseWork();
+      }},
+      b: { label: "Attend the conference (stress down)", effect: () => {
+        state.stats.stress = clamp(state.stats.stress - 8, 0, 100);
+        log("The teacher said your kid is doing great. You felt something unfamiliar: pride that isn't billable.");
+        choseFamily();
+      }}
+    },
+    {
+      type: "work_family",
+      name: "Your best friend is in town for one night. There's a brief due tomorrow.",
+      a: { label: "Finish the brief (points)", effect: () => {
+        state.stats.stress = clamp(state.stats.stress + 7, 0, 100);
+        state.points += 85;
+        log("Brief filed on time. Your friend texted 'maybe next time.' That was six months ago.");
+        choseWork();
+      }},
+      b: { label: "Go see your friend (stress down)", effect: () => {
+        state.stats.stress = clamp(state.stats.stress - 10, 0, 100);
+        state.stats.sleep = clamp(state.stats.sleep - 3, 0, 100);
+        log("You stayed out too late laughing. Sleep is down, but you feel human.");
+        choseFamily();
+      }}
+    },
+    {
+      type: "work_family",
+      name: "Thanksgiving. The family expects you home. The partner expects a draft by Friday.",
+      a: { label: "Work through the holiday (big points)", effect: () => {
+        state.stats.stress = clamp(state.stats.stress + 14, 0, 100);
+        state.stats.sleep = clamp(state.stats.sleep - 6, 0, 100);
+        state.points += 150;
+        log("You billed on Thanksgiving. The office was empty except for you and the cleaning crew.");
+        choseWork();
+      }},
+      b: { label: "Go home for Thanksgiving (stress way down)", effect: () => {
+        state.stats.stress = clamp(state.stats.stress - 18, 0, 100);
+        state.stats.hunger = clamp(state.stats.hunger + 20, 0, 100);
+        state.stats.sleep = clamp(state.stats.sleep + 6, 0, 100);
+        log("Mom's cooking. The couch. Football on TV. For one day, you forgot about billables.");
+        choseFamily();
+      }}
+    },
+    // --- Neutral events (no spiral tracking) ---
+    {
+      type: "neutral",
       name: "Water-cooler chat with senior partner",
       a: { label: "Be charming (rep boost)", effect: () => {
         const boost = 10 + (state.lawyer.outfit.tie ? 2 : 0);
@@ -570,7 +744,12 @@ function triggerRandomEvent() {
     }
   ];
 
-  const ev = randChoice(events);
+  // Weight toward work_family events (80%) to make the spiral meaningful
+  const workFamilyEvents = events.filter(e => e.type === "work_family");
+  const neutralEvents = events.filter(e => e.type === "neutral");
+  const pool = Math.random() < 0.8 ? workFamilyEvents : neutralEvents;
+  const ev = randChoice(pool.length > 0 ? pool : events);
+
   const pickA = confirm(`${ev.name}\n\nOK = ${ev.a.label}\nCancel = ${ev.b.label}`);
   if (pickA) ev.a.effect();
   else ev.b.effect();
@@ -827,6 +1006,9 @@ function productivityMultiplier() {
   if (state.office.bookshelfBuffUntil > now()) mult *= 1.08;
   if (state.lawyer.outfit.casualFridays && isFriday(now())) mult *= 1.04;
 
+  // Burnout: massive productivity penalty
+  if (state.burnout && state.burnoutUntil > now()) mult *= 0.35;
+
   return mult;
 }
 
@@ -849,10 +1031,25 @@ function tick(dtMs) {
 
   if (state.office.walkingPadOn) state.stats.stress = clamp(state.stats.stress - 0.35 * dtHours, 0, 100);
 
+  // Divorce: stress floor at 25 (can never fully relax)
+  if (state.divorced && state.stats.stress < 25) {
+    state.stats.stress = 25;
+  }
+
+  // Burnout recovery check
+  if (state.burnout && state.burnoutUntil > 0 && now() >= state.burnoutUntil) {
+    state.burnout = false;
+    state.burnoutUntil = 0;
+    log("The fog is lifting. Burnout is fading. Productivity restored.");
+  }
+
   const workload = state.queue.length;
   let stressRise = (0.22 + workload * 0.08) * dtHours;
   if (state.store.desk) stressRise *= 0.78;
   if (state.lawyer.outfit.casualFridays && isFriday(now())) stressRise *= 0.9;
+
+  // Divorced: +40% passive stress rise
+  if (state.divorced) stressRise *= 1.4;
 
   state.stats.stress = clamp(state.stats.stress + stressRise, 0, 100);
 
@@ -1382,6 +1579,11 @@ function init() {
   if (!state.nextJuniorSpawnAt) state.nextJuniorSpawnAt = 0;
   if (!state.rival) state.rival = { name: "", score: 0, playerScore: 0, momentum: 0, lastTrashTalkAt: 0, active: false };
   if (!state.breakaway) state.breakaway = { count: 0, multiplier: 1.0, lifetimeEarnings: 0 };
+  if (state.workChoices === undefined) state.workChoices = 0;
+  if (state.familyChoices === undefined) state.familyChoices = 0;
+  if (state.divorced === undefined) state.divorced = false;
+  if (state.burnout === undefined) state.burnout = false;
+  if (state.burnoutUntil === undefined) state.burnoutUntil = 0;
 
   renderAll();
 
