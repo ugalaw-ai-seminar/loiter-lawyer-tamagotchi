@@ -96,7 +96,30 @@ const defaultState = () => ({
   nextOfferRefreshAt: now() + 1000 * 60 * 60 * 8,
   nextChristmasPartyAt: nextChristmasPartyTimestamp(now()),
 
-  log: []
+  log: [],
+
+  // --- Arc mechanics ---
+
+  // Midlevel: Junior management
+  juniors: [],             // Array of { id, name, task, progress, billableHours, points, deadlineAt, assignedAt, completed, missed }
+  nextJuniorSpawnAt: 0,    // When the next junior associate appears
+
+  // Senior: Rival tug-of-war
+  rival: {
+    name: "",
+    score: 0,              // Rival's accumulated score
+    playerScore: 0,        // Player's tug-of-war score
+    momentum: 0,           // -100 to 100 (negative = rival winning, positive = player winning)
+    lastTrashTalkAt: 0,
+    active: false
+  },
+
+  // Partner: Breakaway / prestige
+  breakaway: {
+    count: 0,              // Number of times player has broken away
+    multiplier: 1.0,       // Permanent multiplier from breakaways
+    lifetimeEarnings: 0    // Total points across all runs (used for multiplier calc)
+  }
 });
 
 let state = load() || defaultState();
@@ -555,6 +578,236 @@ function triggerRandomEvent() {
   state.nextEventAt = now() + 1000 * 60 * 60 * randInt(10, 20);
 }
 
+// ---------- Arc helpers ----------
+
+function rankIndex() {
+  const repTotal = state.reputation.lit + state.reputation.corp + state.reputation.reg;
+  let idx = 0;
+  for (let i = 0; i < RANKS.length; i++) {
+    if (state.billables >= RANKS[i].billables && repTotal >= RANKS[i].rep) idx = i;
+  }
+  return idx;
+}
+
+// --- Midlevel: Junior Management ---
+
+const JUNIOR_NAMES = [
+  "Alex Chen", "Jordan Miles", "Priya Patel", "Sam Okafor",
+  "Taylor Webb", "Morgan Reyes", "Casey Kim", "Drew Novak",
+  "Riley Foster", "Quinn Barrett", "Jamie Liu", "Avery Stone"
+];
+
+function spawnJunior() {
+  const kinds = ["lit", "corp", "reg"];
+  const kind = randChoice(kinds);
+  const billableHours = randInt(2, 8);
+  const points = billableHours * randInt(12, 20);
+  const deadlineHours = randInt(24, 120);
+  const names = {
+    lit: ["Draft discovery requests", "Research case law", "Prepare witness outline", "Index exhibits"],
+    corp: ["Organize data room", "Draft ancillary docs", "Review disclosure schedules", "Compile signature pages"],
+    reg: ["Pull agency filings", "Summarize comment letters", "Update compliance tracker", "Draft FOIA request"]
+  };
+
+  return {
+    id: Math.random().toString(36).slice(2),
+    name: randChoice(JUNIOR_NAMES.filter(n => !state.juniors.some(j => j.name === n))) || randChoice(JUNIOR_NAMES),
+    task: randChoice(names[kind]),
+    kind,
+    billableHours,
+    billablesEarned: 0,
+    points,
+    deadlineAt: now() + deadlineHours * 60 * 60 * 1000,
+    assignedAt: now(),
+    progress: 0,
+    completed: false,
+    missed: false,
+    assigned: false  // Player hasn't delegated work yet
+  };
+}
+
+function assignJunior(juniorId) {
+  const j = state.juniors.find(x => x.id === juniorId);
+  if (!j || j.assigned) return;
+  j.assigned = true;
+  j.assignedAt = now();
+  log(`Delegated "${j.task}" to ${j.name}. They're on it.`);
+}
+
+function dismissJunior(juniorId) {
+  const idx = state.juniors.findIndex(x => x.id === juniorId);
+  if (idx === -1) return;
+  const j = state.juniors[idx];
+  if (!j.completed && !j.missed) return;
+  state.juniors.splice(idx, 1);
+}
+
+function tickJuniors(dtHours) {
+  if (rankIndex() < 1) return; // Only midlevel+
+
+  // Spawn juniors periodically (max 3 at a time)
+  const unfinished = state.juniors.filter(j => !j.completed && !j.missed).length;
+  if (now() >= state.nextJuniorSpawnAt && unfinished < 3) {
+    state.juniors.push(spawnJunior());
+    state.nextJuniorSpawnAt = now() + 1000 * 60 * 60 * randInt(8, 18);
+    log("A junior associate is waiting for your direction.");
+  }
+  if (state.nextJuniorSpawnAt === 0) {
+    state.nextJuniorSpawnAt = now() + 1000 * 60 * 60 * randInt(2, 6);
+  }
+
+  for (const j of state.juniors) {
+    if (j.completed || j.missed || !j.assigned) continue;
+
+    // Juniors work at ~60-80% speed with some randomness
+    const juniorSpeed = 0.6 + Math.random() * 0.2;
+    const workDone = juniorSpeed * dtHours;
+    const remaining = j.billableHours - j.billablesEarned;
+    const toAdd = Math.min(remaining, workDone);
+    j.billablesEarned += toAdd;
+    j.progress = clamp(j.billablesEarned / j.billableHours, 0, 1);
+
+    if (now() > j.deadlineAt && j.progress < 1 && !j.missed) {
+      j.missed = true;
+      // No PIP for the player - just a lost opportunity
+      log(`${j.name} missed the deadline on "${j.task}." No bonus this time.`);
+    }
+
+    if (j.progress >= 1 && !j.completed) {
+      j.completed = true;
+      const bonus = Math.round(j.points * state.breakaway.multiplier);
+      state.points += bonus;
+      state.billables += j.billableHours * 0.3; // Partial billable credit for delegation
+      log(`${j.name} completed "${j.task}." Delegation bonus: +${bonus} points.`);
+    }
+  }
+
+  // Auto-clear old finished juniors after 2 hours
+  state.juniors = state.juniors.filter(j =>
+    !(j.completed && now() - j.deadlineAt > 1000 * 60 * 60 * 2) &&
+    !(j.missed && now() - j.deadlineAt > 1000 * 60 * 60 * 2)
+  );
+}
+
+// --- Senior: Rival Tug-of-War ---
+
+const RIVAL_NAMES = [
+  "Sloane Hargrove", "Blaine Whitfield", "Preston Kincaid",
+  "Harper Ellington", "Sterling Cross", "Whitney Aldridge"
+];
+
+const RIVAL_TRASH_TALK = [
+  "just landed a Fortune 500 client. You?",
+  "billed 14 hours yesterday. While golfing.",
+  "was just seen leaving the managing partner's office… smiling.",
+  "got another 'attaboy' email from the exec committee.",
+  "is telling everyone they'll make partner first.",
+  "booked the big conference room for a 'victory lunch.'",
+  "left a copy of their billables report on your chair. Accidentally, of course.",
+  "just asked if you need help 'keeping up.'"
+];
+
+function initRival() {
+  if (state.rival.active) return;
+  state.rival.active = true;
+  state.rival.name = randChoice(RIVAL_NAMES);
+  state.rival.score = 0;
+  state.rival.playerScore = 0;
+  state.rival.momentum = 0;
+  state.rival.lastTrashTalkAt = now();
+  log(`You've been paired against ${state.rival.name} in the race to Counsel. May the best biller win.`);
+}
+
+function tickRival(dtHours) {
+  if (rankIndex() < 2) { // Not senior yet
+    state.rival.active = false;
+    return;
+  }
+  if (rankIndex() > 2) { // Past senior
+    state.rival.active = false;
+    return;
+  }
+  if (!state.rival.active) initRival();
+
+  // Rival accumulates score at a variable rate (semi-random, competitive)
+  const rivalProd = 0.5 + Math.random() * 0.6; // 50-110% effective
+  const rivalBillables = rivalProd * dtHours;
+  const rivalPoints = rivalBillables * randInt(18, 26);
+  state.rival.score += rivalPoints;
+
+  // Player score tracks points earned this tick cycle (accumulated from main tick)
+  // We use a simpler measure: billables * productivity as proxy
+  const prod = productivityMultiplier();
+  const playerWork = prod * dtHours;
+  const playerPoints = playerWork * randInt(20, 28);
+  state.rival.playerScore += playerPoints;
+
+  // Momentum: difference normalized to -100..100
+  const total = state.rival.playerScore + state.rival.score;
+  if (total > 0) {
+    const raw = ((state.rival.playerScore - state.rival.score) / total) * 100;
+    state.rival.momentum = clamp(raw, -100, 100);
+  }
+
+  // Rival trash talk every 12-24 hours
+  if (now() - state.rival.lastTrashTalkAt > 1000 * 60 * 60 * randInt(12, 24)) {
+    state.rival.lastTrashTalkAt = now();
+    log(`${state.rival.name} ${randChoice(RIVAL_TRASH_TALK)}`);
+  }
+
+  // Momentum affects stress slightly
+  if (state.rival.momentum < -30) {
+    state.stats.stress = clamp(state.stats.stress + 0.1 * dtHours, 0, 100);
+  } else if (state.rival.momentum > 30) {
+    state.stats.stress = clamp(state.stats.stress - 0.05 * dtHours, 0, 100);
+  }
+}
+
+// --- Partner: Breakaway / Prestige ---
+
+function calculateBreakawayMultiplier() {
+  // Each breakaway gives a compounding bonus based on lifetime earnings
+  // Formula: 1 + 0.15 * count + log2(1 + lifetimeEarnings / 5000) * 0.1
+  const count = state.breakaway.count;
+  const earnings = state.breakaway.lifetimeEarnings;
+  return 1 + (0.15 * count) + (Math.log2(1 + earnings / 5000) * 0.1);
+}
+
+function canBreakaway() {
+  return rankIndex() >= 4; // Must be Partner
+}
+
+function executeBreakaway() {
+  if (!canBreakaway()) return;
+
+  const oldMultiplier = state.breakaway.multiplier;
+  const oldCount = state.breakaway.count;
+  const totalEarnings = state.breakaway.lifetimeEarnings + state.points;
+
+  // Preserve breakaway data
+  const breakawayData = {
+    count: oldCount + 1,
+    lifetimeEarnings: totalEarnings,
+    multiplier: 1 // recalculated below
+  };
+
+  // Reset to fresh state
+  const fresh = defaultState();
+  fresh.breakaway = breakawayData;
+  fresh.breakaway.multiplier = calculateBreakawayMultiplier.call(null);
+  // Recalculate with the updated breakaway state
+  fresh.breakaway.multiplier = 1 + (0.15 * fresh.breakaway.count) + (Math.log2(1 + fresh.breakaway.lifetimeEarnings / 5000) * 0.1);
+
+  state = fresh;
+  seedOffers(true);
+
+  log(`BREAKAWAY #${state.breakaway.count}! You've left the firm to start your own practice.`);
+  log(`Everything resets, but your experience gives you a ${Math.round((state.breakaway.multiplier - 1) * 100)}% permanent bonus.`);
+  log("Back to Junior Associate — but this time, you know the game.");
+
+  renderAll();
+}
+
 // ---------- Simulation ----------
 function productivityMultiplier() {
   const { hunger, caffeine, sleep, stress } = state.stats;
@@ -609,7 +862,7 @@ function tick(dtMs) {
     if (a.progress >= 1) continue;
 
     const workHoursThisTick = prod * dtHours;
-    const billableGainMult = state.perks.masterBiller ? 1.12 : 1.0;
+    const billableGainMult = (state.perks.masterBiller ? 1.12 : 1.0) * state.breakaway.multiplier;
 
     const remainingBillables = a.billableHours - a.billablesEarned;
     const billablesToAdd = Math.min(remainingBillables, workHoursThisTick * billableGainMult);
@@ -630,7 +883,8 @@ function tick(dtMs) {
     if (a.progress >= 1 && !a._completed) {
       a._completed = true;
 
-      state.points += a.points;
+      const earnedPoints = Math.round(a.points * state.breakaway.multiplier);
+      state.points += earnedPoints;
 
       state.stats.stress = clamp(state.stats.stress + (a.stressImpact * 0.2), 0, 100);
       if (a.kind === "probono") state.stats.stress = clamp(state.stats.stress - 10, 0, 100);
@@ -638,13 +892,14 @@ function tick(dtMs) {
       let repGain = Math.max(4, Math.round(a.billableHours * 1.2));
       if (state.perks.goldenVoice && a.kind === "lit") repGain = Math.round(repGain * 1.25);
       if (state.lawyer.outfit.tie) repGain += 1;
+      repGain = Math.round(repGain * state.breakaway.multiplier);
 
       if (a.kind === "lit") state.reputation.lit += repGain;
       if (a.kind === "corp") state.reputation.corp += repGain;
       if (a.kind === "reg") state.reputation.reg += repGain;
       if (a.kind === "probono") state.reputation.reg += 2;
 
-      log(`Completed: ${a.title}. +${a.points} points, +rep.`);
+      log(`Completed: ${a.title}. +${earnedPoints} points, +rep.`);
     }
   }
 
@@ -659,6 +914,10 @@ function tick(dtMs) {
     log("Office Christmas party (Thursday before Christmas). Stress melts away—for one night.");
     state.nextChristmasPartyAt = nextChristmasPartyTimestamp(now());
   }
+
+  // Arc ticks
+  tickJuniors(dtHours);
+  tickRival(dtHours);
 
   if (state.pipStrikes >= 3) {
     state.dismissed = true;
@@ -678,12 +937,7 @@ function tick(dtMs) {
 }
 
 function rankName() {
-  const repTotal = state.reputation.lit + state.reputation.corp + state.reputation.reg;
-  let current = RANKS[0].name;
-  for (const r of RANKS) {
-    if (state.billables >= r.billables && repTotal >= r.rep) current = r.name;
-  }
-  return current;
+  return RANKS[rankIndex()].name;
 }
 
 // ---------- Rendering ----------
@@ -710,13 +964,17 @@ function renderStats() {
   $("pip").textContent = state.pipStrikes.toString();
 
   const prod = productivityMultiplier();
-  $("prod").textContent = `${Math.round(prod * 100)}%`;
+  const prodLabel = state.breakaway.multiplier > 1
+    ? `${Math.round(prod * 100)}% (${state.breakaway.multiplier.toFixed(2)}x prestige)`
+    : `${Math.round(prod * 100)}%`;
+  $("prod").textContent = prodLabel;
 
   $("rep-lit").textContent = Math.floor(state.reputation.lit);
   $("rep-corp").textContent = Math.floor(state.reputation.corp);
   $("rep-reg").textContent = Math.floor(state.reputation.reg);
 
-  $("rank").textContent = `Rank: ${rankName()}${state.dismissed ? " — DISMISSED" : ""}`;
+  const rankSuffix = state.dismissed ? " — DISMISSED" : (state.breakaway.count > 0 ? ` (Run #${state.breakaway.count + 1})` : "");
+  $("rank").textContent = `Rank: ${rankName()}${rankSuffix}`;
 }
 
 function renderClock() {
@@ -964,12 +1222,131 @@ function drawScene() {
   ctx.fillText("DESK", 240, 202);
 }
 
+// ---------- Arc Rendering ----------
+
+function renderJuniors() {
+  const panel = $("arc-juniors");
+  const ri = rankIndex();
+  if (ri < 1) { panel.style.display = "none"; return; }
+  panel.style.display = "";
+
+  const wrap = $("junior-list");
+  wrap.innerHTML = "";
+
+  if (state.juniors.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "junior-card";
+    empty.innerHTML = '<div class="junior-task">No juniors available right now. Check back soon.</div>';
+    wrap.appendChild(empty);
+    return;
+  }
+
+  for (const j of state.juniors) {
+    const card = document.createElement("div");
+    card.className = "junior-card";
+    const pct = Math.round(j.progress * 100);
+    const dl = new Date(j.deadlineAt).toLocaleString();
+    const statusTag = j.completed
+      ? ' <span class="tag tag-done">Done</span>'
+      : j.missed
+        ? ' <span class="tag tag-missed">Missed</span>'
+        : !j.assigned
+          ? ' <span class="tag" style="background:#1a2a3a;color:#6fb3ff;border:1px solid #2b4a6a">Awaiting</span>'
+          : "";
+
+    card.innerHTML = `
+      <div class="junior-top">
+        <div class="junior-name">${j.name}${statusTag}</div>
+        ${!j.assigned && !j.completed && !j.missed
+          ? `<button class="btn-delegate" data-delegate="${j.id}">Delegate</button>`
+          : !j.completed && !j.missed && j.assigned
+            ? `<div style="color:var(--muted);font-size:11px">${pct}%</div>`
+            : j.completed || j.missed
+              ? `<button class="btn-clear" data-dismiss-junior="${j.id}">Clear</button>`
+              : ""
+        }
+      </div>
+      <div class="junior-task">${j.task} (${j.kind.toUpperCase()})</div>
+      <div class="junior-meta">
+        <span>${j.billableHours}h • +${j.points} pts bonus</span>
+        <span>Due: ${dl}</span>
+      </div>
+      ${j.assigned && !j.completed && !j.missed
+        ? `<div class="progress"><div class="pfill" style="width:${pct}%"></div></div>`
+        : ""
+      }
+    `;
+    wrap.appendChild(card);
+  }
+
+  wrap.querySelectorAll("[data-delegate]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      assignJunior(btn.getAttribute("data-delegate"));
+      renderJuniors();
+    });
+  });
+  wrap.querySelectorAll("[data-dismiss-junior]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      dismissJunior(btn.getAttribute("data-dismiss-junior"));
+      renderJuniors();
+    });
+  });
+}
+
+function renderRival() {
+  const panel = $("arc-rival");
+  if (rankIndex() !== 2 || !state.rival.active) {
+    panel.style.display = "none";
+    return;
+  }
+  panel.style.display = "";
+
+  $("rival-name-label").textContent = state.rival.name;
+  $("rival-pscore").textContent = Math.floor(state.rival.playerScore);
+  $("rival-rscore").textContent = Math.floor(state.rival.score);
+
+  // Tug fill: 0% = rival winning fully, 50% = tied, 100% = player winning fully
+  const fillPct = clamp(50 + state.rival.momentum / 2, 0, 100);
+  $("tug-fill").style.width = `${fillPct}%`;
+
+  const status = $("rival-status");
+  if (state.rival.momentum > 40) {
+    status.textContent = "You're pulling ahead. Keep billing.";
+    status.style.color = "#6fff9a";
+  } else if (state.rival.momentum > 10) {
+    status.textContent = "Slight edge — don't let up.";
+    status.style.color = "#6fb3ff";
+  } else if (state.rival.momentum > -10) {
+    status.textContent = "Dead heat. Every hour counts.";
+    status.style.color = "var(--muted)";
+  } else if (state.rival.momentum > -40) {
+    status.textContent = `${state.rival.name} is edging ahead…`;
+    status.style.color = "#f2d98a";
+  } else {
+    status.textContent = `${state.rival.name} is dominating. Bill harder.`;
+    status.style.color = "#ff6f6f";
+  }
+}
+
+function renderBreakaway() {
+  const panel = $("arc-breakaway");
+  if (rankIndex() < 4) { panel.style.display = "none"; return; }
+  panel.style.display = "";
+
+  $("breakaway-count").textContent = state.breakaway.count;
+  $("breakaway-mult").textContent = state.breakaway.multiplier.toFixed(2) + "x";
+  $("breakaway-earnings").textContent = Math.floor(state.breakaway.lifetimeEarnings + state.points);
+}
+
 function renderAll() {
   renderClock();
   renderStats();
   renderOffers();
   renderQueue();
   renderStore();
+  renderJuniors();
+  renderRival();
+  renderBreakaway();
   renderLog();
   drawScene();
 }
@@ -986,6 +1363,26 @@ function init() {
   seedOffers();
   bindPerks();
   loadStoreCatalog();
+
+  // Breakaway button
+  $("btn-breakaway").addEventListener("click", () => {
+    if (!canBreakaway()) return;
+    const confirmed = confirm(
+      "BREAK AWAY?\n\n" +
+      "You'll leave the firm and start your own practice.\n" +
+      "All progress resets to zero — rank, billables, reputation, everything.\n\n" +
+      `But you'll carry a permanent ${Math.round(((1 + 0.15 * (state.breakaway.count + 1) + Math.log2(1 + (state.breakaway.lifetimeEarnings + state.points) / 5000) * 0.1) - 1) * 100)}% bonus into your next run.\n\n` +
+      "Are you sure?"
+    );
+    if (confirmed) executeBreakaway();
+  });
+
+  // Migrate old saves that lack arc fields
+  if (!state.juniors) state.juniors = [];
+  if (!state.nextJuniorSpawnAt) state.nextJuniorSpawnAt = 0;
+  if (!state.rival) state.rival = { name: "", score: 0, playerScore: 0, momentum: 0, lastTrashTalkAt: 0, active: false };
+  if (!state.breakaway) state.breakaway = { count: 0, multiplier: 1.0, lifetimeEarnings: 0 };
+
   renderAll();
 
   setInterval(() => {

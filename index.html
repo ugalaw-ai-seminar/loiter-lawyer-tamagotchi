@@ -74,6 +74,34 @@
           <button id="btn-clear-finished">Clear Finished</button>
         </div>
         <div id="queue" class="list"></div>
+
+        <!-- Midlevel Arc: Junior Management -->
+        <div id="arc-juniors" class="arc-panel" style="display:none">
+          <h3>Junior Associates</h3>
+          <div class="arc-hint">Delegate tasks to your juniors. Completed work earns you bonus points.</div>
+          <div id="junior-list" class="list"></div>
+        </div>
+
+        <!-- Senior Arc: Rival Tug-of-War -->
+        <div id="arc-rival" class="arc-panel" style="display:none">
+          <h3>Senior Rivalry</h3>
+          <div class="rival-header">
+            <span id="rival-player-label">You</span>
+            <span id="rival-name-label">Rival</span>
+          </div>
+          <div class="tug-bar-wrap">
+            <div class="tug-bar">
+              <div id="tug-fill" class="tug-fill"></div>
+              <div class="tug-center"></div>
+            </div>
+          </div>
+          <div class="rival-scores">
+            <span id="rival-pscore">0</span>
+            <span class="rival-vs">vs</span>
+            <span id="rival-rscore">0</span>
+          </div>
+          <div id="rival-status" class="arc-hint"></div>
+        </div>
       </section>
 
       <section class="panel right">
@@ -97,6 +125,20 @@
           <label><input type="checkbox" id="perk-nightowl"> Night Owl</label>
           <label><input type="checkbox" id="perk-masterbiller"> Master Biller</label>
           <label><input type="checkbox" id="perk-goldenvoice"> Golden Voice</label>
+        </div>
+
+        <!-- Partner Arc: Breakaway -->
+        <div id="arc-breakaway" class="arc-panel" style="display:none">
+          <h2>Breakaway</h2>
+          <div class="breakaway-box">
+            <div class="breakaway-info">
+              <div>Breakaways: <strong id="breakaway-count">0</strong></div>
+              <div>Multiplier: <strong id="breakaway-mult">1.00x</strong></div>
+              <div>Lifetime Earnings: <strong id="breakaway-earnings">0</strong></div>
+            </div>
+            <div class="breakaway-desc">Leave the firm. Start your own practice. Everything resets — but your experience compounds. Each breakaway makes you stronger.</div>
+            <button id="btn-breakaway" class="btn-breakaway">Break Away</button>
+          </div>
         </div>
 
         <h2>Log</h2>
