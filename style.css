@@ -48,10 +48,16 @@ button:disabled { opacity:0.45; cursor:not-allowed; }
 .btn-clear { font-size:11px; padding:3px 8px; background:#1c2230; border:1px solid #3b4560; color:var(--muted); cursor:pointer; border-radius:6px; }
 .btn-clear:hover { border-color:var(--accent); color:var(--text); }
 
+.store-header { display:flex; justify-content:space-between; align-items:center; }
+.store-header h2 { margin:0 0 10px; }
+.store-header button { font-size:11px; padding:4px 10px; }
 .store { display:flex; flex-direction:column; gap:10px; }
 .store-item { border:1px solid #252a36; border-radius:10px; background:#10131a; padding:10px; }
+.store-item.owned { opacity:0.6; }
 .store-item .name { font-weight:700; font-size:13px; }
 .store-item .desc { color: var(--muted); font-size:12px; margin:6px 0; }
+.store-status { color: var(--muted); font-size:12px; padding:8px 0; text-align:center; }
+.store-offline { color:#f2d98a; font-size:11px; margin-top:4px; }
 .rep, .perks { border:1px solid #252a36; border-radius:10px; background:#10131a; padding:10px; color: var(--muted); font-size:12px; }
 .perks label { display:block; margin:6px 0; }
 .log { border:1px solid #252a36; border-radius:10px; background:#0b0c10; padding:10px; height:180px; overflow:auto; font-size:12px; color: var(--muted); }

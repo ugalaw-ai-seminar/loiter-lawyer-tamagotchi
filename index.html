@@ -77,38 +77,12 @@
       </section>
 
       <section class="panel right">
-        <h2>Company Store</h2>
-        <div class="store">
-          <div class="store-item">
-            <div class="name">Fun Hat</div>
-            <div class="desc">Cosmetic. Slight stress reduction on breaks.</div>
-            <button data-buy="hat">Buy (250)</button>
-          </div>
-          <div class="store-item">
-            <div class="name">New Tie Patterns</div>
-            <div class="desc">Cosmetic. Small rep gain buff.</div>
-            <button data-buy="tie">Buy (200)</button>
-          </div>
-          <div class="store-item">
-            <div class="name">Casual Fridays</div>
-            <div class="desc">On Fridays, passive stress decay improves.</div>
-            <button data-buy="casual">Buy (500)</button>
-          </div>
-          <div class="store-item">
-            <div class="name">Mini-Fridge</div>
-            <div class="desc">Hunger decays slower.</div>
-            <button data-buy="fridge">Buy (800)</button>
-          </div>
-          <div class="store-item">
-            <div class="name">Better Coffee Maker</div>
-            <div class="desc">Caffeine decays slower.</div>
-            <button data-buy="coffeeMaker">Buy (800)</button>
-          </div>
-          <div class="store-item">
-            <div class="name">Standing Desk</div>
-            <div class="desc">Stress rises slower during work.</div>
-            <button data-buy="desk">Buy (900)</button>
-          </div>
+        <div class="store-header">
+          <h2>Company Store</h2>
+          <button id="btn-refresh-store" onclick="refreshStore()">Refresh</button>
+        </div>
+        <div class="store" id="store-items">
+          <div class="store-status">Loading store catalog…</div>
         </div>
 
         <h2>Reputation</h2>

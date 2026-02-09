@@ -13,6 +13,7 @@
     "files": [
       "main.js",
       "renderer.js",
+      "store-api.js",
       "index.html",
       "style.css"
     ],
