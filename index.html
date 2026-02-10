@@ -111,6 +111,29 @@
       </section>
 
       <section class="panel right">
+        <div class="settings-header">
+          <h2>API Settings</h2>
+          <button id="btn-toggle-settings">Show</button>
+        </div>
+        <div id="settings-panel" class="settings-panel" style="display:none">
+          <div class="settings-field">
+            <label for="input-api-base">API Base URL</label>
+            <input type="text" id="input-api-base" placeholder="https://your-api.com/api" spellcheck="false" />
+          </div>
+          <div class="settings-field">
+            <label for="input-api-key">API Key</label>
+            <div class="api-key-wrap">
+              <input type="password" id="input-api-key" placeholder="Enter your API key" spellcheck="false" />
+              <button id="btn-toggle-key-vis" class="btn-key-vis" title="Show/hide key">Show</button>
+            </div>
+          </div>
+          <div class="settings-actions">
+            <button id="btn-save-api">Connect</button>
+            <button id="btn-clear-api">Disconnect</button>
+          </div>
+          <div id="api-status" class="api-status"></div>
+        </div>
+
         <div class="store-header">
           <h2>Company Store</h2>
           <button id="btn-refresh-store" onclick="refreshStore()">Refresh</button>
