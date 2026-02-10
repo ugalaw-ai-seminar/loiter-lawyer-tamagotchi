@@ -1,10 +1,18 @@
 // Store API client for Loiter Lawyer Tamagotchi
 // Fetches store catalog and handles purchases via remote API.
-// Falls back to hardcoded items when the API is unreachable.
+// Falls back to built-in items when no API is configured or the API is unreachable.
+//
+// Configuration: Create ~/.biglaw-sim/store-config.json with:
+//   { "apiBase": "https://your-api.com/api", "apiKey": "your-key-here" }
+// If the file doesn't exist, the built-in catalog is used (no error shown).
 
-const STORE_API_BASE = "https://loiter-lawyer-store.lylecheatem.com/api";
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
 
-const FALLBACK_ITEMS = [
+const CONFIG_FILE = path.join(os.homedir(), ".biglaw-sim", "store-config.json");
+
+const BUILTIN_ITEMS = [
   {
     id: "hat",
     name: "Fun Hat",
@@ -59,20 +67,37 @@ let _cachedCatalog = null;
 let _catalogFetchedAt = 0;
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
+/**
+ * Read store API config from ~/.biglaw-sim/store-config.json.
+ * Returns { apiBase, apiKey } or null if not configured.
+ */
+function loadConfig() {
+  try {
+    if (!fs.existsSync(CONFIG_FILE)) return null;
+    const raw = fs.readFileSync(CONFIG_FILE, "utf-8");
+    const cfg = JSON.parse(raw);
+    if (!cfg.apiBase) return null;
+    return { apiBase: cfg.apiBase.replace(/\/+$/, ""), apiKey: cfg.apiKey || "" };
+  } catch {
+    return null;
+  }
+}
+
 async function apiFetch(endpoint, options = {}) {
-  const url = `${STORE_API_BASE}${endpoint}`;
+  const config = loadConfig();
+  if (!config) throw new Error("No API configured");
+
+  const url = `${config.apiBase}${endpoint}`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
 
   try {
-    const res = await fetch(url, {
-      ...options,
-      signal: controller.signal,
-      headers: {
-        "Content-Type": "application/json",
-        ...(options.headers || {})
-      }
-    });
+    const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+    if (config.apiKey) {
+      headers["Authorization"] = `Bearer ${config.apiKey}`;
+    }
+
+    const res = await fetch(url, { ...options, signal: controller.signal, headers });
 
     if (!res.ok) {
       throw new Error(`Store API error: ${res.status} ${res.statusText}`);
@@ -85,10 +110,20 @@ async function apiFetch(endpoint, options = {}) {
 }
 
 /**
- * Fetch the store catalog from the API.
- * Returns an array of item objects. Falls back to hardcoded items on failure.
+ * Fetch the store catalog.
+ * - source "builtin": no API configured, using built-in items (normal default)
+ * - source "api": fetched from remote API
+ * - source "cache": returned cached API result
+ * - source "fallback": API configured but unreachable, using built-in items
  */
 async function fetchCatalog() {
+  const config = loadConfig();
+
+  // No API configured — use built-in items silently (this is the normal case)
+  if (!config) {
+    return { items: BUILTIN_ITEMS, source: "builtin" };
+  }
+
   const now = Date.now();
   if (_cachedCatalog && (now - _catalogFetchedAt) < CACHE_TTL_MS) {
     return { items: _cachedCatalog, source: "cache" };
@@ -98,7 +133,6 @@ async function fetchCatalog() {
     const data = await apiFetch("/store/items");
     const items = Array.isArray(data.items) ? data.items : data;
 
-    // Validate that items have the expected shape
     const valid = items.every(
       (it) => it.id && it.name && typeof it.cost === "number"
     );
@@ -109,22 +143,24 @@ async function fetchCatalog() {
     return { items, source: "api" };
   } catch (err) {
     console.warn("Store API unreachable, using fallback catalog:", err.message);
-    return { items: FALLBACK_ITEMS, source: "fallback" };
+    return { items: BUILTIN_ITEMS, source: "fallback" };
   }
 }
 
 /**
  * Notify the API that a purchase was made (fire-and-forget).
- * Purchase logic stays client-side since the game state is local.
+ * Does nothing if no API is configured.
  */
 async function reportPurchase(itemId, pointsSpent) {
+  const config = loadConfig();
+  if (!config) return;
+
   try {
     await apiFetch("/store/purchase", {
       method: "POST",
       body: JSON.stringify({ itemId, pointsSpent, timestamp: Date.now() })
     });
   } catch (err) {
-    // Non-critical — purchase already applied locally
     console.warn("Could not report purchase to API:", err.message);
   }
 }
@@ -135,4 +171,9 @@ function invalidateCache() {
   _catalogFetchedAt = 0;
 }
 
-module.exports = { fetchCatalog, reportPurchase, invalidateCache, FALLBACK_ITEMS };
+/** Check whether an API is currently configured. */
+function isConfigured() {
+  return loadConfig() !== null;
+}
+
+module.exports = { fetchCatalog, reportPurchase, invalidateCache, isConfigured, BUILTIN_ITEMS };

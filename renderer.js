@@ -407,7 +407,13 @@ function renderStore() {
   if (storeSource === "fallback") {
     const note = document.createElement("div");
     note.className = "store-status store-offline";
-    note.textContent = "Offline mode — showing cached catalog.";
+    note.textContent = "Store API unreachable — showing built-in catalog.";
+    wrap.appendChild(note);
+  } else if (storeSource === "api") {
+    const note = document.createElement("div");
+    note.className = "store-status";
+    note.style.color = "#6fff9a";
+    note.textContent = "Connected to store API.";
     wrap.appendChild(note);
   }
 
