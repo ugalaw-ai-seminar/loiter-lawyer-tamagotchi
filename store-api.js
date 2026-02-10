@@ -2,9 +2,12 @@
 // Fetches store catalog and handles purchases via remote API.
 // Falls back to built-in items when no API is configured or the API is unreachable.
 //
-// Configuration: Create ~/.biglaw-sim/store-config.json with:
-//   { "apiBase": "https://your-api.com/api", "apiKey": "your-key-here" }
-// If the file doesn't exist, the built-in catalog is used (no error shown).
+// Configuration (two options, in-app takes priority):
+//   1. In-app: Use setConfig({ apiBase, apiKey }) from the renderer
+//   2. File:   Create ~/.biglaw-sim/store-config.json with:
+//              { "apiBase": "https://your-api.com/api", "apiKey": "your-key-here" }
+//
+// If neither is set, the built-in catalog is used (no error shown).
 
 const fs = require("fs");
 const path = require("path");
@@ -67,11 +70,39 @@ let _cachedCatalog = null;
 let _catalogFetchedAt = 0;
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
+// In-app config set by the renderer via setConfig()
+let _inAppConfig = null;
+
 /**
- * Read store API config from ~/.biglaw-sim/store-config.json.
+ * Set the API configuration from the in-app settings UI.
+ * Pass { apiBase, apiKey } to connect, or null to disconnect.
+ */
+function setConfig(cfg) {
+  if (!cfg || !cfg.apiBase) {
+    _inAppConfig = null;
+  } else {
+    _inAppConfig = {
+      apiBase: cfg.apiBase.replace(/\/+$/, ""),
+      apiKey: cfg.apiKey || ""
+    };
+  }
+  invalidateCache();
+}
+
+/** Get the current in-app config (for saving to game state). */
+function getConfig() {
+  return _inAppConfig ? { ..._inAppConfig } : null;
+}
+
+/**
+ * Resolve the active config. In-app config takes priority over file config.
  * Returns { apiBase, apiKey } or null if not configured.
  */
 function loadConfig() {
+  // In-app config takes priority
+  if (_inAppConfig) return _inAppConfig;
+
+  // Fall back to file-based config
   try {
     if (!fs.existsSync(CONFIG_FILE)) return null;
     const raw = fs.readFileSync(CONFIG_FILE, "utf-8");
@@ -143,7 +174,7 @@ async function fetchCatalog() {
     return { items, source: "api" };
   } catch (err) {
     console.warn("Store API unreachable, using fallback catalog:", err.message);
-    return { items: BUILTIN_ITEMS, source: "fallback" };
+    return { items: BUILTIN_ITEMS, source: "fallback", error: err.message };
   }
 }
 
@@ -176,4 +207,4 @@ function isConfigured() {
   return loadConfig() !== null;
 }
 
-module.exports = { fetchCatalog, reportPurchase, invalidateCache, isConfigured, BUILTIN_ITEMS };
+module.exports = { fetchCatalog, reportPurchase, invalidateCache, isConfigured, setConfig, getConfig, BUILTIN_ITEMS };

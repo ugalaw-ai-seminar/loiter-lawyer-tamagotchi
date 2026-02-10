@@ -107,5 +107,29 @@ button:disabled { opacity:0.45; cursor:not-allowed; }
 .npc-btn { flex:1; font-size:11px; padding:6px 8px; }
 .npc-done { color:#555; font-size:11px; margin-top:6px; font-style:italic; }
 
+/* --- API Settings --- */
+.settings-header { display:flex; justify-content:space-between; align-items:center; }
+.settings-header h2 { margin:0 0 10px; }
+.settings-header button { font-size:11px; padding:4px 10px; }
+.settings-panel { border:1px solid #252a36; border-radius:10px; background:#10131a; padding:12px; margin-bottom:12px; }
+.settings-field { margin-bottom:10px; }
+.settings-field label { display:block; color: var(--muted); font-size:11px; margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px; }
+.settings-field input { width:100%; background:#0b0c10; border:1px solid #2a3040; border-radius:6px; padding:7px 10px; color: var(--text); font-size:12px; font-family:ui-monospace, monospace; }
+.settings-field input:focus { outline:none; border-color: var(--accent); }
+.settings-field input::placeholder { color:#555; }
+.api-key-wrap { display:flex; gap:6px; }
+.api-key-wrap input { flex:1; }
+.btn-key-vis { font-size:10px; padding:4px 8px; white-space:nowrap; }
+.settings-actions { display:flex; gap:8px; margin-top:8px; }
+.settings-actions button { flex:1; font-size:12px; padding:6px 10px; }
+#btn-save-api { background:#1a3a2a; border-color:#2b5a3a; color:#6fff9a; }
+#btn-save-api:hover { border-color:#6fff9a; }
+#btn-clear-api { background:#3a1a1a; border-color:#5a2b2b; color:#ff6f6f; }
+#btn-clear-api:hover { border-color:#ff6f6f; }
+.api-status { font-size:11px; margin-top:8px; color: var(--muted); }
+.api-status.connected { color:#6fff9a; }
+.api-status.error { color:#ff6f6f; }
+.api-status.disconnected { color: var(--muted); }
+
 footer { display:flex; gap:10px; align-items:center; padding:10px 12px; border-top:1px solid #252a36; color: var(--muted); font-size:12px; }
 .hint { margin-left:auto; }

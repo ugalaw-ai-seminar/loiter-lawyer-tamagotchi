@@ -130,7 +130,10 @@ const defaultState = () => ({
 
   // NPCs
   npcs: [],                // Active NPCs in the office { id, name, type, persona, quote, effect, expiresAt, interacted }
-  nextNpcSpawnAt: 0        // When next NPC wanders in
+  nextNpcSpawnAt: 0,       // When next NPC wanders in
+
+  // API settings (persisted so user doesn't re-enter each session)
+  apiConfig: null           // { apiBase, apiKey } or null
 });
 
 let state = load() || defaultState();
@@ -434,6 +437,89 @@ async function loadStoreCatalog() {
 function refreshStore() {
   storeApi.invalidateCache();
   loadStoreCatalog();
+}
+
+// ---------- API Settings UI ----------
+function initSettingsUI() {
+  const toggleBtn = $("btn-toggle-settings");
+  const panel = $("settings-panel");
+  const inputBase = $("input-api-base");
+  const inputKey = $("input-api-key");
+  const saveBtn = $("btn-save-api");
+  const clearBtn = $("btn-clear-api");
+  const toggleKeyBtn = $("btn-toggle-key-vis");
+  const statusEl = $("api-status");
+
+  // Toggle settings panel visibility
+  toggleBtn.addEventListener("click", () => {
+    const hidden = panel.style.display === "none";
+    panel.style.display = hidden ? "" : "none";
+    toggleBtn.textContent = hidden ? "Hide" : "Show";
+  });
+
+  // Toggle API key visibility
+  toggleKeyBtn.addEventListener("click", () => {
+    const isPassword = inputKey.type === "password";
+    inputKey.type = isPassword ? "text" : "password";
+    toggleKeyBtn.textContent = isPassword ? "Hide" : "Show";
+  });
+
+  // Connect: save config to state and store-api, then reload catalog
+  saveBtn.addEventListener("click", async () => {
+    const apiBase = inputBase.value.trim();
+    const apiKey = inputKey.value.trim();
+
+    if (!apiBase) {
+      statusEl.textContent = "Please enter an API Base URL.";
+      statusEl.className = "api-status error";
+      return;
+    }
+
+    statusEl.textContent = "Connecting...";
+    statusEl.className = "api-status";
+
+    // Save to state (persisted across sessions)
+    state.apiConfig = { apiBase, apiKey };
+    storeApi.setConfig(state.apiConfig);
+
+    // Try fetching the catalog to verify connection
+    const result = await storeApi.fetchCatalog();
+    storeCatalog = result.items;
+    storeSource = result.source;
+
+    if (result.source === "api") {
+      statusEl.textContent = "Connected to store API.";
+      statusEl.className = "api-status connected";
+      log("Store API connected: " + apiBase);
+    } else if (result.source === "fallback") {
+      statusEl.textContent = "API unreachable: " + (result.error || "connection failed") + ". Using built-in catalog.";
+      statusEl.className = "api-status error";
+      log("Store API connection failed: " + (result.error || "unreachable"));
+    }
+
+    renderStore();
+  });
+
+  // Disconnect: clear config
+  clearBtn.addEventListener("click", () => {
+    state.apiConfig = null;
+    storeApi.setConfig(null);
+    inputBase.value = "";
+    inputKey.value = "";
+    statusEl.textContent = "Disconnected. Using built-in catalog.";
+    statusEl.className = "api-status disconnected";
+    log("Store API disconnected.");
+    loadStoreCatalog();
+  });
+
+  // Restore saved config into UI fields and store-api
+  if (state.apiConfig && state.apiConfig.apiBase) {
+    inputBase.value = state.apiConfig.apiBase;
+    inputKey.value = state.apiConfig.apiKey || "";
+    storeApi.setConfig(state.apiConfig);
+    statusEl.textContent = "API configured. Hit Refresh to reconnect.";
+    statusEl.className = "api-status";
+  }
 }
 
 // ---------- Assignments ----------
@@ -1922,7 +2008,9 @@ function init() {
   if (state.burnoutUntil === undefined) state.burnoutUntil = 0;
   if (!state.npcs) state.npcs = [];
   if (!state.nextNpcSpawnAt) state.nextNpcSpawnAt = 0;
+  if (state.apiConfig === undefined) state.apiConfig = null;
 
+  initSettingsUI();
   renderAll();
 
   setInterval(() => {
