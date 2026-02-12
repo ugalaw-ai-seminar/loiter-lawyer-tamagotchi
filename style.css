@@ -58,8 +58,45 @@ button:disabled { opacity:0.45; cursor:not-allowed; }
 .store-item .desc { color: var(--muted); font-size:12px; margin:6px 0; }
 .store-status { color: var(--muted); font-size:12px; padding:8px 0; text-align:center; }
 .store-offline { color:#f2d98a; font-size:11px; margin-top:4px; }
+/* Bitcoin trading */
+.bitcoin-box { border:1px solid #252a36; border-radius:10px; background:#10131a; padding:12px; }
+.bitcoin-info { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted); }
+.bitcoin-row { display:flex; justify-content:space-between; }
+.bitcoin-row strong { color:var(--text); }
+.btc-unit { font-size:10px; color:#555; }
+.btc-updated { font-size:10px; color:#555; margin:6px 0; text-align:right; }
+.bitcoin-actions { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+.btc-profit { color:#6fff9a !important; }
+.btc-loss { color:#ff6f6f !important; }
+
 .rep, .perks { border:1px solid #252a36; border-radius:10px; background:#10131a; padding:10px; color: var(--muted); font-size:12px; }
-.perks label { display:block; margin:6px 0; }
+.perks { display:flex; flex-direction:column; gap:8px; }
+.perk-card { border:1px solid #252a36; border-radius:8px; background:#0b0c10; padding:10px; }
+.perk-card.owned { border-color:#2b5a3a; }
+.perk-card.locked { opacity:0.45; }
+.perk-name { font-weight:700; font-size:13px; color:var(--text); display:flex; justify-content:space-between; align-items:center; }
+.perk-name .perk-status { font-size:10px; font-weight:600; padding:1px 6px; border-radius:6px; }
+.perk-active { background:#1a3a2a; color:#6fff9a; border:1px solid #2b5a3a; }
+.perk-locked-tag { background:#2a2030; color:#a080c0; border:1px solid #3a2a50; }
+.perk-desc { color:var(--muted); font-size:11px; margin-top:4px; line-height:1.3; }
+.perk-req { color:#555; font-size:10px; margin-top:6px; }
+.perk-card button { width:100%; margin-top:8px; font-size:12px; padding:6px 10px; }
+.perk-card button.btn-buy-perk { background:#1a2a3a; border-color:#2b4a5a; color:var(--accent); }
+.perk-card button.btn-buy-perk:hover { border-color:var(--accent); }
+
+/* Achievements */
+.ach-header { display:flex; justify-content:space-between; align-items:center; }
+.ach-header h2 { margin:0 0 10px; }
+.ach-header button { font-size:11px; padding:4px 10px; }
+.ach-count { font-size:12px; font-weight:400; color:var(--muted); }
+.ach-list { display:flex; flex-direction:column; gap:4px; border:1px solid #252a36; border-radius:10px; background:#10131a; padding:10px; margin-bottom:10px; max-height:240px; overflow:auto; }
+.ach-item { display:flex; justify-content:space-between; align-items:baseline; gap:8px; padding:5px 8px; border-radius:6px; font-size:11px; color:#555; border:1px solid transparent; }
+.ach-item.earned { color:var(--text); background:#0d1210; border-color:#1a3a2a; }
+.ach-name { font-weight:700; white-space:nowrap; }
+.ach-item.earned .ach-name { color:#6fff9a; }
+.ach-desc { text-align:right; color:var(--muted); font-size:10px; }
+.ach-item:not(.earned) .ach-desc { color:#333; }
+
 .log { border:1px solid #252a36; border-radius:10px; background:#0b0c10; padding:10px; height:180px; overflow:auto; font-size:12px; color: var(--muted); }
 .log .entry { margin-bottom:6px; }
 

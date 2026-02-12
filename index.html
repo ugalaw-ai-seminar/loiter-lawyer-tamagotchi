@@ -35,9 +35,9 @@
           <h3>Assistant Actions</h3>
           <div class="grid">
             <button id="btn-coffee">Refill Coffee Pot</button>
-            <button id="btn-food">Order Takeout</button>
+            <button id="btn-food">Order Takeout ($15)</button>
             <button id="btn-nap">Power Nap</button>
-            <button id="btn-sin">Use “Sin” Pouch</button>
+            <button id="btn-sin">Use "Sin" Pouch ($8)</button>
 
             <button id="btn-probono">Take Pro Bono Task</button>
             <button id="btn-window">Look Out Window</button>
@@ -63,7 +63,7 @@
 
         <div class="workbox">
           <div class="row">
-            <div><strong>Points:</strong> <span id="points"></span></div>
+            <div><strong>Money:</strong> <span id="points"></span></div>
             <div><strong>Billables (lifetime):</strong> <span id="billables"></span></div>
           </div>
           <div class="row">
@@ -142,6 +142,35 @@
           <div class="store-status">Loading store catalog…</div>
         </div>
 
+        <h2>Bitcoin</h2>
+        <div id="bitcoin-panel" class="bitcoin-box">
+          <div class="bitcoin-info">
+            <div class="bitcoin-row">
+              <span>BTC Price:</span>
+              <strong id="btc-price" style="color:#f2d98a">--</strong>
+            </div>
+            <div class="bitcoin-row">
+              <span>Holdings:</span>
+              <span><strong id="btc-holdings">0</strong> <span class="btc-unit">BTC</span></span>
+            </div>
+            <div class="bitcoin-row">
+              <span>Value:</span>
+              <strong id="btc-value">$0</strong>
+            </div>
+            <div class="bitcoin-row">
+              <span>P&amp;L:</span>
+              <strong id="btc-pnl">$0</strong>
+            </div>
+          </div>
+          <div id="btc-updated" class="btc-updated"></div>
+          <div class="bitcoin-actions">
+            <button id="btn-btc-buy-50">Buy $50</button>
+            <button id="btn-btc-buy-100">Buy $100</button>
+            <button id="btn-btc-sell-half">Sell Half</button>
+            <button id="btn-btc-sell-all">Sell All</button>
+          </div>
+        </div>
+
         <h2>Reputation</h2>
         <div class="rep">
           <div>Litigation: <span id="rep-lit"></span></div>
@@ -150,11 +179,13 @@
         </div>
 
         <h2>Perks</h2>
-        <div class="perks">
-          <label><input type="checkbox" id="perk-nightowl"> Night Owl</label>
-          <label><input type="checkbox" id="perk-masterbiller"> Master Biller</label>
-          <label><input type="checkbox" id="perk-goldenvoice"> Golden Voice</label>
+        <div id="perk-list" class="perks"></div>
+
+        <div class="ach-header">
+          <h2>Achievements <span id="ach-header-count" class="ach-count">(0/0)</span></h2>
+          <button id="btn-toggle-ach">Show</button>
         </div>
+        <div id="ach-list" class="ach-list" style="display:none"></div>
 
         <!-- Partner Arc: Breakaway -->
         <div id="arc-breakaway" class="arc-panel" style="display:none">

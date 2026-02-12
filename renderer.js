@@ -20,6 +20,45 @@ const RANKS = [
   { name: "Partner", billables: 3600, rep: 600 }
 ];
 
+const PERK_DEFS = [
+  { id: "nightOwl",     name: "Night Owl",     cost: 600,  rankReq: 1, desc: "Sleep penalty on productivity reduced by 45%." },
+  { id: "masterBiller", name: "Master Biller", cost: 1200, rankReq: 2, desc: "+12% billable hours earned on completed tasks." },
+  { id: "goldenVoice",  name: "Golden Voice",  cost: 1800, rankReq: 3, desc: "+25% reputation gain on litigation assignments." }
+];
+
+const ACHIEVEMENT_DEFS = [
+  // Progression
+  { id: "first_billing",    name: "Billable Hour",       desc: "Complete your first assignment.",     check: () => state.billables > 0 },
+  { id: "century_club",     name: "Century Club",        desc: "Bill 100 lifetime hours.",            check: () => state.billables >= 100 },
+  { id: "billing_machine",  name: "Billing Machine",     desc: "Bill 1,000 lifetime hours.",          check: () => state.billables >= 1000 },
+  { id: "rank_1",           name: "Moving Up",           desc: "Reach Midlevel Associate.",           check: () => rankIndex() >= 1 },
+  { id: "rank_2",           name: "Senior Material",     desc: "Reach Senior Associate.",             check: () => rankIndex() >= 2 },
+  { id: "rank_3",           name: "On Track",            desc: "Reach Counsel (Partner Track).",      check: () => rankIndex() >= 3 },
+  { id: "rank_4",           name: "Made Partner",        desc: "Reach Partner.",                      check: () => rankIndex() >= 4 },
+  // Money
+  { id: "first_grand",      name: "First Grand",        desc: "Have $1,000 at once.",                check: () => state.money >= 1000 },
+  { id: "five_figures",     name: "Five Figures",        desc: "Have $10,000 at once.",               check: () => state.money >= 10000 },
+  // Survival
+  { id: "all_nighter",      name: "All-Nighter",        desc: "Sleep drops below 10.",               check: () => state.stats.sleep < 10 },
+  { id: "meltdown",         name: "Meltdown",           desc: "Stress exceeds 95.",                  check: () => state.stats.stress > 95 },
+  { id: "wired",            name: "Wired",              desc: "Max out caffeine.",                   check: () => state.stats.caffeine >= 100 },
+  { id: "starving",         name: "Starving Artist",    desc: "Hunger drops below 10.",              check: () => state.stats.hunger < 10 },
+  // Life events
+  { id: "divorced",         name: "Irreconcilable",     desc: "Get divorced.",                       check: () => state.divorced === true },
+  { id: "burnout",          name: "Burned Out",         desc: "Experience burnout.",                  check: () => state.burnout === true },
+  { id: "pip_strike",       name: "On Thin Ice",        desc: "Receive a PIP strike.",               check: () => state.pipStrikes >= 1 },
+  // Bitcoin
+  { id: "crypto_curious",   name: "Crypto Curious",     desc: "Buy Bitcoin for the first time.",     check: () => state.bitcoin && state.bitcoin.totalInvested > 0 },
+  { id: "diamond_hands",    name: "Diamond Hands",      desc: "Hold $1,000+ in Bitcoin.",            check: () => state.bitcoin && state.bitcoin.holdings * (btcPrice || state.bitcoin.lastPrice) >= 1000 },
+  // Prestige
+  { id: "breakaway_1",      name: "Fresh Start",        desc: "Complete a breakaway.",               check: () => state.breakaway.count >= 1 },
+  { id: "breakaway_3",      name: "Serial Entrepreneur", desc: "Complete 3 breakaways.",             check: () => state.breakaway.count >= 3 },
+  // Perks & store
+  { id: "buy_perk",         name: "Self-Investment",    desc: "Unlock any perk.",                    check: () => state.perks.nightOwl || state.perks.masterBiller || state.perks.goldenVoice },
+  { id: "all_perks",        name: "Fully Loaded",       desc: "Unlock all three perks.",             check: () => state.perks.nightOwl && state.perks.masterBiller && state.perks.goldenVoice },
+  { id: "buy_item",         name: "Retail Therapy",     desc: "Buy something from the store.",       check: () => state.lawyer.outfit.hat || state.lawyer.outfit.tie || state.lawyer.outfit.casualFridays || state.store.fridge || state.store.coffeeMaker || state.store.desk },
+];
+
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 function now() { return Date.now(); }
 
@@ -81,7 +120,7 @@ const defaultState = () => ({
     stress: 35
   },
 
-  points: 0,
+  money: 0,
   billables: 0,
 
   reputation: { lit: 0, corp: 0, reg: 0 },
@@ -118,7 +157,7 @@ const defaultState = () => ({
   breakaway: {
     count: 0,              // Number of times player has broken away
     multiplier: 1.0,       // Permanent multiplier from breakaways
-    lifetimeEarnings: 0    // Total points across all runs (used for multiplier calc)
+    lifetimeEarnings: 0    // Total money across all runs (used for multiplier calc)
   },
 
   // Work/family choice spiral
@@ -133,7 +172,19 @@ const defaultState = () => ({
   nextNpcSpawnAt: 0,       // When next NPC wanders in
 
   // API settings (persisted so user doesn't re-enter each session)
-  apiConfig: null           // { apiBase, apiKey } or null
+  apiConfig: null,          // { apiBase, apiKey } or null
+
+  // Bitcoin
+  bitcoin: {
+    holdings: 0,            // BTC amount (fractional)
+    totalInvested: 0,       // Total $ spent buying
+    lastPrice: 0,           // Last known BTC price (persisted for offline fallback)
+    stressCheckPrice: 0,    // Price at last stress effect check
+    lastStressCheckAt: 0    // Timestamp of last stress check
+  },
+
+  // Achievements (persisted across breakaways)
+  achievements: []          // Array of { id, unlockedAt }
 });
 
 let state = load() || defaultState();
@@ -200,23 +251,104 @@ $("btn-new").addEventListener("click", () => {
   renderAll();
 });
 
-function bindPerks() {
-  $("perk-nightowl").checked = state.perks.nightOwl;
-  $("perk-masterbiller").checked = state.perks.masterBiller;
-  $("perk-goldenvoice").checked = state.perks.goldenVoice;
+function buyPerk(perkId) {
+  const def = PERK_DEFS.find(p => p.id === perkId);
+  if (!def) return;
+  if (state.perks[perkId]) { log("Already owned."); return; }
+  if (rankIndex() < def.rankReq) { log(`Requires rank: ${RANKS[def.rankReq].name}.`); return; }
+  if (state.money < def.cost) { log("Not enough money."); return; }
+  state.money -= def.cost;
+  state.perks[perkId] = true;
+  log(`Perk unlocked: ${def.name}!`);
+  renderAll();
+}
 
-  $("perk-nightowl").addEventListener("change", (e) => {
-    state.perks.nightOwl = !!e.target.checked;
-    log(`Perk toggled: Night Owl = ${state.perks.nightOwl}`);
+function renderPerks() {
+  const wrap = $("perk-list");
+  wrap.innerHTML = "";
+  const ri = rankIndex();
+
+  for (const def of PERK_DEFS) {
+    const owned = !!state.perks[def.id];
+    const meetsRank = ri >= def.rankReq;
+    const canAfford = state.money >= def.cost;
+
+    const card = document.createElement("div");
+    card.className = "perk-card" + (owned ? " owned" : "") + (!meetsRank ? " locked" : "");
+
+    let statusHtml = "";
+    if (owned) {
+      statusHtml = '<span class="perk-status perk-active">Active</span>';
+    } else if (!meetsRank) {
+      statusHtml = '<span class="perk-status perk-locked-tag">Locked</span>';
+    }
+
+    let reqText = `Requires: ${RANKS[def.rankReq].name}`;
+    if (!meetsRank) reqText += " (not yet reached)";
+
+    let buttonHtml = "";
+    if (!owned) {
+      if (!meetsRank) {
+        buttonHtml = `<button disabled>Locked — ${RANKS[def.rankReq].name}</button>`;
+      } else {
+        buttonHtml = `<button class="btn-buy-perk" data-perk="${def.id}" ${!canAfford ? "disabled" : ""}>Buy ($${def.cost})</button>`;
+      }
+    }
+
+    card.innerHTML = `
+      <div class="perk-name">${def.name} ${statusHtml}</div>
+      <div class="perk-desc">${def.desc}</div>
+      <div class="perk-req">${reqText} · $${def.cost}</div>
+      ${buttonHtml}
+    `;
+    wrap.appendChild(card);
+  }
+
+  wrap.querySelectorAll("[data-perk]").forEach(btn => {
+    btn.addEventListener("click", () => buyPerk(btn.getAttribute("data-perk")));
   });
-  $("perk-masterbiller").addEventListener("change", (e) => {
-    state.perks.masterBiller = !!e.target.checked;
-    log(`Perk toggled: Master Biller = ${state.perks.masterBiller}`);
-  });
-  $("perk-goldenvoice").addEventListener("change", (e) => {
-    state.perks.goldenVoice = !!e.target.checked;
-    log(`Perk toggled: Golden Voice = ${state.perks.goldenVoice}`);
-  });
+}
+
+// ---------- Achievements ----------
+
+let achPanelOpen = false;
+
+function checkAchievements() {
+  if (!state.achievements) state.achievements = [];
+  const unlocked = new Set(state.achievements.map(a => a.id));
+  let newlyUnlocked = false;
+
+  for (const def of ACHIEVEMENT_DEFS) {
+    if (unlocked.has(def.id)) continue;
+    try {
+      if (def.check()) {
+        state.achievements.push({ id: def.id, unlockedAt: now() });
+        log(`Achievement unlocked: ${def.name}!`);
+        newlyUnlocked = true;
+      }
+    } catch (_) { /* check may reference missing state fields */ }
+  }
+
+  if (newlyUnlocked) renderAchievements();
+}
+
+function renderAchievements() {
+  const total = ACHIEVEMENT_DEFS.length;
+  const unlocked = state.achievements ? state.achievements.length : 0;
+  $("ach-header-count").textContent = `(${unlocked}/${total})`;
+
+  const wrap = $("ach-list");
+  wrap.innerHTML = "";
+
+  const unlockedIds = new Set((state.achievements || []).map(a => a.id));
+
+  for (const def of ACHIEVEMENT_DEFS) {
+    const earned = unlockedIds.has(def.id);
+    const div = document.createElement("div");
+    div.className = "ach-item" + (earned ? " earned" : "");
+    div.innerHTML = `<span class="ach-name">${earned ? def.name : "???"}</span><span class="ach-desc">${earned ? def.desc : "Keep playing to find out."}</span>`;
+    wrap.appendChild(div);
+  }
 }
 
 // ---------- Assistant actions ----------
@@ -227,15 +359,17 @@ $("btn-coffee").addEventListener("click", () => {
 });
 
 $("btn-food").addEventListener("click", () => {
+  if (state.money < 15) { log("Not enough money for takeout. ($15)"); return; }
+  state.money -= 15;
   state.stats.hunger = clamp(state.stats.hunger + 40, 0, 100);
   state.stats.stress = clamp(state.stats.stress - 3, 0, 100);
 
   const lines = [
-    "Ordered takeout. Chinese again…",
-    "Ordered takeout. The delivery guy knows your floor by heart.",
-    "Ordered takeout. Ate over the keyboard like a professional.",
-    "Ordered takeout. It’s technically dinner if it arrives after midnight.",
-    "Ordered takeout. The receipt looks like a billing statement."
+    "Ordered takeout ($15). Chinese again…",
+    "Ordered takeout ($15). The delivery guy knows your floor by heart.",
+    "Ordered takeout ($15). Ate over the keyboard like a professional.",
+    "Ordered takeout ($15). It's technically dinner if it arrives after midnight.",
+    "Ordered takeout ($15). The receipt looks like a billing statement."
   ];
   log(randChoice(lines));
 });
@@ -247,10 +381,12 @@ $("btn-nap").addEventListener("click", () => {
 });
 
 $("btn-sin").addEventListener("click", () => {
+  if (state.money < 8) { log("Not enough money for a 'Sin' pouch. ($8)"); return; }
+  state.money -= 8;
   state._sinUntil = now() + 1000 * 60 * 60 * 6; // 6 hours
   state.stats.stress = clamp(state.stats.stress + 6, 0, 100);
   state.stats.sleep = clamp(state.stats.sleep - 6, 0, 100);
-  log("Used a 'Sin' pouch. Productivity up (6h), but sleep/stress take a hit.");
+  log("Used a 'Sin' pouch ($8). Productivity up (6h), but sleep/stress take a hit.");
 });
 
 $("btn-clear-finished").addEventListener("click", () => clearFinishedTasks());
@@ -258,7 +394,7 @@ $("btn-clear-finished").addEventListener("click", () => clearFinishedTasks());
 $("btn-probono").addEventListener("click", () => {
   const a = makeAssignment({ kind: "probono" });
   state.queue.push(a);
-  log("Accepted a pro bono matter. Low points, stress relief on completion.");
+  log("Accepted a pro bono matter. No pay, but stress relief on completion.");
 });
 
 $("btn-window").addEventListener("click", () => {
@@ -370,11 +506,11 @@ function buy(itemId) {
     log("Already owned.");
     return;
   }
-  if (state.points < item.cost) {
-    log("Not enough points.");
+  if (state.money < item.cost) {
+    log("Not enough money.");
     return;
   }
-  state.points -= item.cost;
+  state.money -= item.cost;
   applyItemEffect(item);
   log(`Purchased: ${item.name}.`);
   storeApi.reportPurchase(item.id, item.cost);
@@ -402,7 +538,7 @@ function renderStore() {
     div.innerHTML = `
       <div class="name">${item.name}${owned ? ' <span class="tag tag-done">Owned</span>' : ""}</div>
       <div class="desc">${item.description || ""}</div>
-      <button data-buy="${item.id}" ${owned ? "disabled" : ""}>${owned ? "Owned" : `Buy (${item.cost})`}</button>
+      <button data-buy="${item.id}" ${owned ? "disabled" : ""}>${owned ? "Owned" : `Buy ($${item.cost})`}</button>
     `;
     wrap.appendChild(div);
   }
@@ -519,6 +655,94 @@ function initSettingsUI() {
     storeApi.setConfig(state.apiConfig);
     statusEl.textContent = "API configured. Hit Refresh to reconnect.";
     statusEl.className = "api-status";
+  }
+}
+
+// ---------- Bitcoin ----------
+let btcPrice = 0;
+let btcPriceUpdatedAt = 0;
+let btcFetchError = null;
+
+async function fetchBtcPrice() {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(
+      "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd",
+      { signal: controller.signal }
+    );
+    if (!res.ok) throw new Error(`${res.status}`);
+    const data = await res.json();
+    btcPrice = data.bitcoin.usd;
+    btcPriceUpdatedAt = now();
+    btcFetchError = null;
+    state.bitcoin.lastPrice = btcPrice;
+  } catch (e) {
+    btcFetchError = e.message;
+    if (state.bitcoin.lastPrice > 0 && btcPrice === 0) {
+      btcPrice = state.bitcoin.lastPrice;
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function buyBtc(dollars) {
+  if (btcPrice <= 0) { log("Bitcoin price unavailable. Try again later."); return; }
+  if (state.money < dollars) { log("Not enough money."); return; }
+  state.money -= dollars;
+  const amount = dollars / btcPrice;
+  state.bitcoin.holdings += amount;
+  state.bitcoin.totalInvested += dollars;
+  log(`Bought $${dollars} of BTC at $${btcPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}/BTC.`);
+  renderAll();
+}
+
+function sellBtc(fraction) {
+  if (btcPrice <= 0) { log("Bitcoin price unavailable. Try again later."); return; }
+  if (state.bitcoin.holdings <= 0) { log("No Bitcoin to sell."); return; }
+  const sellAmount = state.bitcoin.holdings * fraction;
+  const dollars = Math.floor(sellAmount * btcPrice);
+  const investedPortion = state.bitcoin.totalInvested * fraction;
+  state.bitcoin.holdings -= sellAmount;
+  state.bitcoin.totalInvested -= investedPortion;
+  if (fraction >= 1) { state.bitcoin.holdings = 0; state.bitcoin.totalInvested = 0; }
+  state.money += dollars;
+  const pnl = dollars - Math.round(investedPortion);
+  const pnlStr = pnl >= 0 ? `+$${pnl}` : `-$${Math.abs(pnl)}`;
+  log(`Sold Bitcoin for $${dollars} (${pnlStr} P&L).`);
+  renderAll();
+}
+
+function tickBitcoin(dtHours) {
+  if (state.bitcoin.holdings <= 0 || btcPrice <= 0) return;
+
+  // Initialize stress check price on first tick with holdings
+  if (state.bitcoin.stressCheckPrice <= 0) {
+    state.bitcoin.stressCheckPrice = btcPrice;
+    state.bitcoin.lastStressCheckAt = now();
+    return;
+  }
+
+  // Only check stress effects once per hour
+  if (now() - state.bitcoin.lastStressCheckAt < 1000 * 60 * 60) return;
+
+  const change = (btcPrice - state.bitcoin.stressCheckPrice) / state.bitcoin.stressCheckPrice;
+  state.bitcoin.stressCheckPrice = btcPrice;
+  state.bitcoin.lastStressCheckAt = now();
+
+  // Scale stress effect with portfolio size (bigger position = bigger swings)
+  const portfolioValue = state.bitcoin.holdings * btcPrice;
+  const stressScale = clamp(portfolioValue / 1000, 0.5, 4);
+
+  if (change < -0.02) {
+    const stressUp = Math.abs(change) * 15 * stressScale;
+    state.stats.stress = clamp(state.stats.stress + stressUp, 0, 100);
+    log(`Bitcoin dropped ${Math.abs(Math.round(change * 100))}%. Portfolio stress rising.`);
+  } else if (change > 0.03) {
+    const stressDown = change * 8 * stressScale;
+    state.stats.stress = clamp(state.stats.stress - stressDown, 0, 100);
+    log(`Bitcoin up ${Math.round(change * 100)}%. Feeling bullish.`);
   }
 }
 
@@ -672,11 +896,11 @@ function triggerRandomEvent() {
     {
       type: "work_family",
       name: "Partner email: 'Need this tonight.'",
-      a: { label: "Pull all-nighter (points)", effect: () => {
+      a: { label: "Pull all-nighter ($120)", effect: () => {
         state.stats.stress = clamp(state.stats.stress + 10, 0, 100);
         state.stats.sleep = clamp(state.stats.sleep - 10, 0, 100);
-        state.points += 120;
-        log("You chose the all-nighter. Points up, stress/sleep down.");
+        state.money += 120;
+        log("You chose the all-nighter. +$120, stress/sleep down.");
         choseWork();
       }},
       b: { label: "Negotiate deadline (safer)", effect: () => {
@@ -693,25 +917,25 @@ function triggerRandomEvent() {
     {
       type: "work_family",
       name: "Family conflict: date night vs urgent filing",
-      a: { label: "Skip date, file tonight (points)", effect: () => {
+      a: { label: "Skip date, file tonight ($90)", effect: () => {
         state.stats.stress = clamp(state.stats.stress + 8, 0, 100);
-        state.points += 90;
-        log("Career choice: more points, more stress.");
+        state.money += 90;
+        log("Career choice: +$90, more stress.");
         choseWork();
       }},
       b: { label: "Go on the date (stress down)", effect: () => {
         state.stats.stress = clamp(state.stats.stress - 10, 0, 100);
-        log("Family choice: stress down, no points.");
+        log("Family choice: stress down, no pay.");
         choseFamily();
       }}
     },
     {
       type: "work_family",
       name: "Child sick at childcare: pick up vs push through",
-      a: { label: "Push through (points)", effect: () => {
+      a: { label: "Push through ($110)", effect: () => {
         state.stats.stress = clamp(state.stats.stress + 10, 0, 100);
-        state.points += 110;
-        log("Pushed through. Points up, stress up.");
+        state.money += 110;
+        log("Pushed through. +$110, stress up.");
         choseWork();
       }},
       b: { label: "Pick up child (stress down)", effect: () => {
@@ -724,11 +948,11 @@ function triggerRandomEvent() {
     {
       type: "work_family",
       name: "Your daughter's dance recital is tonight. There's also a client dinner.",
-      a: { label: "Skip the recital, attend the dinner (points + rep)", effect: () => {
+      a: { label: "Skip the recital, attend the dinner ($100 + rep)", effect: () => {
         state.stats.stress = clamp(state.stats.stress + 6, 0, 100);
-        state.points += 100;
+        state.money += 100;
         state.reputation.corp += 5;
-        log("You went to the dinner. The partner was impressed. Your daughter wasn't.");
+        log("You went to the dinner. +$100, +rep. Your daughter wasn't impressed.");
         choseWork();
       }},
       b: { label: "Go to the recital (stress down)", effect: () => {
@@ -740,11 +964,11 @@ function triggerRandomEvent() {
     {
       type: "work_family",
       name: "Your son's baseball game is Saturday. A partner wants you in the office.",
-      a: { label: "Work Saturday (points)", effect: () => {
+      a: { label: "Work Saturday ($95)", effect: () => {
         state.stats.stress = clamp(state.stats.stress + 8, 0, 100);
         state.stats.sleep = clamp(state.stats.sleep - 4, 0, 100);
-        state.points += 95;
-        log("Another Saturday at the office. Your son hit a home run. You heard about it later.");
+        state.money += 95;
+        log("Another Saturday at the office. +$95. Your son hit a home run. You heard about it later.");
         choseWork();
       }},
       b: { label: "Go to the game (stress down)", effect: () => {
@@ -757,11 +981,11 @@ function triggerRandomEvent() {
     {
       type: "work_family",
       name: "Anniversary dinner tonight. But a deal is closing and the partner 'needs bodies.'",
-      a: { label: "Stay for the close (big points)", effect: () => {
+      a: { label: "Stay for the close ($140 + rep)", effect: () => {
         state.stats.stress = clamp(state.stats.stress + 12, 0, 100);
-        state.points += 140;
+        state.money += 140;
         state.reputation.corp += 4;
-        log("The deal closed at 2 AM. Your spouse ate alone. Again.");
+        log("The deal closed at 2 AM. +$140, +rep. Your spouse ate alone. Again.");
         choseWork();
       }},
       b: { label: "Go to dinner (stress down, risk rep)", effect: () => {
@@ -778,10 +1002,10 @@ function triggerRandomEvent() {
     {
       type: "work_family",
       name: "Parent-teacher conference conflicts with a deposition prep session.",
-      a: { label: "Skip the conference (points)", effect: () => {
+      a: { label: "Skip the conference ($80)", effect: () => {
         state.stats.stress = clamp(state.stats.stress + 6, 0, 100);
-        state.points += 80;
-        log("Depo prep went well. The teacher sent a note home. You didn't read it.");
+        state.money += 80;
+        log("Depo prep went well. +$80. The teacher sent a note home. You didn't read it.");
         choseWork();
       }},
       b: { label: "Attend the conference (stress down)", effect: () => {
@@ -793,10 +1017,10 @@ function triggerRandomEvent() {
     {
       type: "work_family",
       name: "Your best friend is in town for one night. There's a brief due tomorrow.",
-      a: { label: "Finish the brief (points)", effect: () => {
+      a: { label: "Finish the brief ($85)", effect: () => {
         state.stats.stress = clamp(state.stats.stress + 7, 0, 100);
-        state.points += 85;
-        log("Brief filed on time. Your friend texted 'maybe next time.' That was six months ago.");
+        state.money += 85;
+        log("Brief filed on time. +$85. Your friend texted 'maybe next time.' That was six months ago.");
         choseWork();
       }},
       b: { label: "Go see your friend (stress down)", effect: () => {
@@ -809,11 +1033,11 @@ function triggerRandomEvent() {
     {
       type: "work_family",
       name: "Thanksgiving. The family expects you home. The partner expects a draft by Friday.",
-      a: { label: "Work through the holiday (big points)", effect: () => {
+      a: { label: "Work through the holiday ($150)", effect: () => {
         state.stats.stress = clamp(state.stats.stress + 14, 0, 100);
         state.stats.sleep = clamp(state.stats.sleep - 6, 0, 100);
-        state.points += 150;
-        log("You billed on Thanksgiving. The office was empty except for you and the cleaning crew.");
+        state.money += 150;
+        log("You billed on Thanksgiving. +$150. The office was empty except for you and the cleaning crew.");
         choseWork();
       }},
       b: { label: "Go home for Thanksgiving (stress way down)", effect: () => {
@@ -951,9 +1175,9 @@ function tickJuniors(dtHours) {
     if (j.progress >= 1 && !j.completed) {
       j.completed = true;
       const bonus = Math.round(j.points * state.breakaway.multiplier);
-      state.points += bonus;
+      state.money += bonus;
       state.billables += j.billableHours * 0.3; // Partial billable credit for delegation
-      log(`${j.name} completed "${j.task}." Delegation bonus: +${bonus} points.`);
+      log(`${j.name} completed "${j.task}." Delegation bonus: +$${bonus}.`);
     }
   }
 
@@ -1057,7 +1281,8 @@ function executeBreakaway() {
 
   const oldMultiplier = state.breakaway.multiplier;
   const oldCount = state.breakaway.count;
-  const totalEarnings = state.breakaway.lifetimeEarnings + state.points;
+  const btcValue = Math.floor((state.bitcoin ? state.bitcoin.holdings : 0) * btcPrice);
+  const totalEarnings = state.breakaway.lifetimeEarnings + state.money + btcValue;
 
   // Preserve breakaway data
   const breakawayData = {
@@ -1066,9 +1291,13 @@ function executeBreakaway() {
     multiplier: 1 // recalculated below
   };
 
+  // Preserve achievements across breakaways
+  const savedAchievements = state.achievements ? [...state.achievements] : [];
+
   // Reset to fresh state
   const fresh = defaultState();
   fresh.breakaway = breakawayData;
+  fresh.achievements = savedAchievements;
   fresh.breakaway.multiplier = calculateBreakawayMultiplier.call(null);
   // Recalculate with the updated breakaway state
   fresh.breakaway.multiplier = 1 + (0.15 * fresh.breakaway.count) + (Math.log2(1 + fresh.breakaway.lifetimeEarnings / 5000) * 0.1);
@@ -1323,7 +1552,7 @@ function interactNpc(npcId, choice) {
   if (eff.caffeine) state.stats.caffeine = clamp(state.stats.caffeine + eff.caffeine, 0, 100);
   if (eff.hunger) state.stats.hunger = clamp(state.stats.hunger + eff.hunger, 0, 100);
   if (eff.sleep) state.stats.sleep = clamp(state.stats.sleep + eff.sleep, 0, 100);
-  if (eff.points) state.points += eff.points;
+  if (eff.points) state.money += eff.points;
   if (eff.repLit) state.reputation.lit += eff.repLit;
   if (eff.repCorp) state.reputation.corp += eff.repCorp;
   if (eff.repReg) state.reputation.reg += eff.repReg;
@@ -1444,7 +1673,7 @@ function tick(dtMs) {
       a._completed = true;
 
       const earnedPoints = Math.round(a.points * state.breakaway.multiplier);
-      state.points += earnedPoints;
+      state.money += earnedPoints;
 
       state.stats.stress = clamp(state.stats.stress + (a.stressImpact * 0.2), 0, 100);
       if (a.kind === "probono") state.stats.stress = clamp(state.stats.stress - 10, 0, 100);
@@ -1459,7 +1688,7 @@ function tick(dtMs) {
       if (a.kind === "reg") state.reputation.reg += repGain;
       if (a.kind === "probono") state.reputation.reg += 2;
 
-      log(`Completed: ${a.title}. +${earnedPoints} points, +rep.`);
+      log(`Completed: ${a.title}. +$${earnedPoints}, +rep.`);
     }
   }
 
@@ -1479,6 +1708,7 @@ function tick(dtMs) {
   tickJuniors(dtHours);
   tickRival(dtHours);
   tickNpcs(dtHours);
+  tickBitcoin(dtHours);
 
   if (state.pipStrikes >= 3) {
     state.dismissed = true;
@@ -1495,6 +1725,8 @@ function tick(dtMs) {
     state.pipStrikes += 1;
     log("Critical condition persisted. HR is 'circling back' (PIP strike).");
   }
+
+  checkAchievements();
 }
 
 function rankName() {
@@ -1520,7 +1752,7 @@ function renderStats() {
   $("val-sleep").textContent = Math.round(s.sleep);
   $("val-stress").textContent = Math.round(s.stress);
 
-  $("points").textContent = Math.floor(state.points).toString();
+  $("points").textContent = "$" + Math.floor(state.money).toString();
   $("billables").textContent = Math.floor(state.billables).toString();
   $("pip").textContent = state.pipStrikes.toString();
 
@@ -1561,7 +1793,7 @@ function renderOffers() {
       </div>
       <div class="mini">
         <div>${o.billableHours}h billables</div>
-        <div>+${o.points} points</div>
+        <div>+$${o.points}</div>
       </div>
     `;
     wrap.appendChild(card);
@@ -1605,7 +1837,7 @@ function renderQueue() {
       </div>
       <div class="mini">
         <div>${Math.floor(a.billablesEarned)}/${a.billableHours}h</div>
-        <div>${a.points} pts</div>
+        <div>$${a.points}</div>
       </div>
       <div class="progress"><div class="pfill" style="width:${pct}%"></div></div>
     `;
@@ -1829,7 +2061,7 @@ function renderJuniors() {
       </div>
       <div class="junior-task">${j.task} (${j.kind.toUpperCase()})</div>
       <div class="junior-meta">
-        <span>${j.billableHours}h • +${j.points} pts bonus</span>
+        <span>${j.billableHours}h • +$${j.points} bonus</span>
         <span>Due: ${dl}</span>
       </div>
       ${j.assigned && !j.completed && !j.missed
@@ -1896,7 +2128,8 @@ function renderBreakaway() {
 
   $("breakaway-count").textContent = state.breakaway.count;
   $("breakaway-mult").textContent = state.breakaway.multiplier.toFixed(2) + "x";
-  $("breakaway-earnings").textContent = Math.floor(state.breakaway.lifetimeEarnings + state.points);
+  const btcVal = Math.floor((state.bitcoin ? state.bitcoin.holdings : 0) * btcPrice);
+  $("breakaway-earnings").textContent = "$" + Math.floor(state.breakaway.lifetimeEarnings + state.money + btcVal);
 }
 
 function renderNpcs() {
@@ -1956,12 +2189,62 @@ function renderNpcs() {
   });
 }
 
+function renderBitcoin() {
+  // Price
+  const priceStr = btcPrice > 0
+    ? "$" + btcPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })
+    : "--";
+  $("btc-price").textContent = priceStr;
+
+  // Updated timestamp
+  const updEl = $("btc-updated");
+  if (btcPriceUpdatedAt > 0) {
+    const ago = Math.floor((now() - btcPriceUpdatedAt) / 1000);
+    updEl.textContent = ago < 10 ? "Price: just now" : `Price: ${ago}s ago`;
+    updEl.style.color = "#555";
+  } else if (btcFetchError) {
+    updEl.textContent = "Price: offline";
+    updEl.style.color = "#ff6f6f";
+  }
+
+  // Holdings
+  const holdings = state.bitcoin.holdings;
+  $("btc-holdings").textContent = holdings > 0 ? holdings.toFixed(6) : "0";
+
+  // Value
+  const value = Math.floor(holdings * btcPrice);
+  $("btc-value").textContent = "$" + value.toLocaleString();
+
+  // P&L
+  const pnl = value - Math.round(state.bitcoin.totalInvested);
+  const pnlEl = $("btc-pnl");
+  if (holdings <= 0) {
+    pnlEl.textContent = "$0";
+    pnlEl.className = "";
+  } else if (pnl >= 0) {
+    pnlEl.textContent = "+$" + pnl.toLocaleString();
+    pnlEl.className = "btc-profit";
+  } else {
+    pnlEl.textContent = "-$" + Math.abs(pnl).toLocaleString();
+    pnlEl.className = "btc-loss";
+  }
+
+  // Disable buttons when appropriate
+  $("btn-btc-buy-50").disabled = state.money < 50 || btcPrice <= 0;
+  $("btn-btc-buy-100").disabled = state.money < 100 || btcPrice <= 0;
+  $("btn-btc-sell-half").disabled = holdings <= 0 || btcPrice <= 0;
+  $("btn-btc-sell-all").disabled = holdings <= 0 || btcPrice <= 0;
+}
+
 function renderAll() {
   renderClock();
   renderStats();
   renderOffers();
   renderQueue();
   renderStore();
+  renderPerks();
+  renderAchievements();
+  renderBitcoin();
   renderJuniors();
   renderRival();
   renderBreakaway();
@@ -1980,8 +2263,14 @@ function saveSilent() {
 
 function init() {
   seedOffers();
-  bindPerks();
   loadStoreCatalog();
+
+  // Achievement panel toggle
+  $("btn-toggle-ach").addEventListener("click", () => {
+    achPanelOpen = !achPanelOpen;
+    $("ach-list").style.display = achPanelOpen ? "flex" : "none";
+    $("btn-toggle-ach").textContent = achPanelOpen ? "Hide" : "Show";
+  });
 
   // Breakaway button
   $("btn-breakaway").addEventListener("click", () => {
@@ -1990,7 +2279,7 @@ function init() {
       "BREAK AWAY?\n\n" +
       "You'll leave the firm and start your own practice.\n" +
       "All progress resets to zero — rank, billables, reputation, everything.\n\n" +
-      `But you'll carry a permanent ${Math.round(((1 + 0.15 * (state.breakaway.count + 1) + Math.log2(1 + (state.breakaway.lifetimeEarnings + state.points) / 5000) * 0.1) - 1) * 100)}% bonus into your next run.\n\n` +
+      `But you'll carry a permanent ${Math.round(((1 + 0.15 * (state.breakaway.count + 1) + Math.log2(1 + (state.breakaway.lifetimeEarnings + state.money + Math.floor((state.bitcoin ? state.bitcoin.holdings : 0) * btcPrice)) / 5000) * 0.1) - 1) * 100)}% bonus into your next run.\n\n` +
       "Are you sure?"
     );
     if (confirmed) executeBreakaway();
@@ -2009,8 +2298,23 @@ function init() {
   if (!state.npcs) state.npcs = [];
   if (!state.nextNpcSpawnAt) state.nextNpcSpawnAt = 0;
   if (state.apiConfig === undefined) state.apiConfig = null;
+  if (state.money === undefined) { state.money = state.points || 0; delete state.points; }
+  if (!state.bitcoin) state.bitcoin = { holdings: 0, totalInvested: 0, lastPrice: 0, stressCheckPrice: 0, lastStressCheckAt: 0 };
+  if (!state.perks) state.perks = { nightOwl: false, masterBiller: false, goldenVoice: false };
+  if (!state.achievements) state.achievements = [];
 
   initSettingsUI();
+
+  // Bitcoin buttons
+  $("btn-btc-buy-50").addEventListener("click", () => buyBtc(50));
+  $("btn-btc-buy-100").addEventListener("click", () => buyBtc(100));
+  $("btn-btc-sell-half").addEventListener("click", () => sellBtc(0.5));
+  $("btn-btc-sell-all").addEventListener("click", () => sellBtc(1));
+
+  // Start fetching Bitcoin price
+  fetchBtcPrice();
+  setInterval(fetchBtcPrice, 60 * 1000); // Refresh every 60 seconds
+
   renderAll();
 
   setInterval(() => {
