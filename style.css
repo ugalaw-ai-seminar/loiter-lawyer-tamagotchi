@@ -58,6 +58,17 @@ button:disabled { opacity:0.45; cursor:not-allowed; }
 .store-item .desc { color: var(--muted); font-size:12px; margin:6px 0; }
 .store-status { color: var(--muted); font-size:12px; padding:8px 0; text-align:center; }
 .store-offline { color:#f2d98a; font-size:11px; margin-top:4px; }
+/* Bitcoin trading */
+.bitcoin-box { border:1px solid #252a36; border-radius:10px; background:#10131a; padding:12px; }
+.bitcoin-info { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted); }
+.bitcoin-row { display:flex; justify-content:space-between; }
+.bitcoin-row strong { color:var(--text); }
+.btc-unit { font-size:10px; color:#555; }
+.btc-updated { font-size:10px; color:#555; margin:6px 0; text-align:right; }
+.bitcoin-actions { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+.btc-profit { color:#6fff9a !important; }
+.btc-loss { color:#ff6f6f !important; }
+
 .rep, .perks { border:1px solid #252a36; border-radius:10px; background:#10131a; padding:10px; color: var(--muted); font-size:12px; }
 .perks label { display:block; margin:6px 0; }
 .log { border:1px solid #252a36; border-radius:10px; background:#0b0c10; padding:10px; height:180px; overflow:auto; font-size:12px; color: var(--muted); }

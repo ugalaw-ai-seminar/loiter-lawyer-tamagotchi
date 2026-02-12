@@ -133,7 +133,16 @@ const defaultState = () => ({
   nextNpcSpawnAt: 0,       // When next NPC wanders in
 
   // API settings (persisted so user doesn't re-enter each session)
-  apiConfig: null           // { apiBase, apiKey } or null
+  apiConfig: null,          // { apiBase, apiKey } or null
+
+  // Bitcoin
+  bitcoin: {
+    holdings: 0,            // BTC amount (fractional)
+    totalInvested: 0,       // Total $ spent buying
+    lastPrice: 0,           // Last known BTC price (persisted for offline fallback)
+    stressCheckPrice: 0,    // Price at last stress effect check
+    lastStressCheckAt: 0    // Timestamp of last stress check
+  }
 });
 
 let state = load() || defaultState();
@@ -523,6 +532,94 @@ function initSettingsUI() {
     storeApi.setConfig(state.apiConfig);
     statusEl.textContent = "API configured. Hit Refresh to reconnect.";
     statusEl.className = "api-status";
+  }
+}
+
+// ---------- Bitcoin ----------
+let btcPrice = 0;
+let btcPriceUpdatedAt = 0;
+let btcFetchError = null;
+
+async function fetchBtcPrice() {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(
+      "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd",
+      { signal: controller.signal }
+    );
+    if (!res.ok) throw new Error(`${res.status}`);
+    const data = await res.json();
+    btcPrice = data.bitcoin.usd;
+    btcPriceUpdatedAt = now();
+    btcFetchError = null;
+    state.bitcoin.lastPrice = btcPrice;
+  } catch (e) {
+    btcFetchError = e.message;
+    if (state.bitcoin.lastPrice > 0 && btcPrice === 0) {
+      btcPrice = state.bitcoin.lastPrice;
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function buyBtc(dollars) {
+  if (btcPrice <= 0) { log("Bitcoin price unavailable. Try again later."); return; }
+  if (state.money < dollars) { log("Not enough money."); return; }
+  state.money -= dollars;
+  const amount = dollars / btcPrice;
+  state.bitcoin.holdings += amount;
+  state.bitcoin.totalInvested += dollars;
+  log(`Bought $${dollars} of BTC at $${btcPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}/BTC.`);
+  renderAll();
+}
+
+function sellBtc(fraction) {
+  if (btcPrice <= 0) { log("Bitcoin price unavailable. Try again later."); return; }
+  if (state.bitcoin.holdings <= 0) { log("No Bitcoin to sell."); return; }
+  const sellAmount = state.bitcoin.holdings * fraction;
+  const dollars = Math.floor(sellAmount * btcPrice);
+  const investedPortion = state.bitcoin.totalInvested * fraction;
+  state.bitcoin.holdings -= sellAmount;
+  state.bitcoin.totalInvested -= investedPortion;
+  if (fraction >= 1) { state.bitcoin.holdings = 0; state.bitcoin.totalInvested = 0; }
+  state.money += dollars;
+  const pnl = dollars - Math.round(investedPortion);
+  const pnlStr = pnl >= 0 ? `+$${pnl}` : `-$${Math.abs(pnl)}`;
+  log(`Sold Bitcoin for $${dollars} (${pnlStr} P&L).`);
+  renderAll();
+}
+
+function tickBitcoin(dtHours) {
+  if (state.bitcoin.holdings <= 0 || btcPrice <= 0) return;
+
+  // Initialize stress check price on first tick with holdings
+  if (state.bitcoin.stressCheckPrice <= 0) {
+    state.bitcoin.stressCheckPrice = btcPrice;
+    state.bitcoin.lastStressCheckAt = now();
+    return;
+  }
+
+  // Only check stress effects once per hour
+  if (now() - state.bitcoin.lastStressCheckAt < 1000 * 60 * 60) return;
+
+  const change = (btcPrice - state.bitcoin.stressCheckPrice) / state.bitcoin.stressCheckPrice;
+  state.bitcoin.stressCheckPrice = btcPrice;
+  state.bitcoin.lastStressCheckAt = now();
+
+  // Scale stress effect with portfolio size (bigger position = bigger swings)
+  const portfolioValue = state.bitcoin.holdings * btcPrice;
+  const stressScale = clamp(portfolioValue / 1000, 0.5, 4);
+
+  if (change < -0.02) {
+    const stressUp = Math.abs(change) * 15 * stressScale;
+    state.stats.stress = clamp(state.stats.stress + stressUp, 0, 100);
+    log(`Bitcoin dropped ${Math.abs(Math.round(change * 100))}%. Portfolio stress rising.`);
+  } else if (change > 0.03) {
+    const stressDown = change * 8 * stressScale;
+    state.stats.stress = clamp(state.stats.stress - stressDown, 0, 100);
+    log(`Bitcoin up ${Math.round(change * 100)}%. Feeling bullish.`);
   }
 }
 
@@ -1061,7 +1158,8 @@ function executeBreakaway() {
 
   const oldMultiplier = state.breakaway.multiplier;
   const oldCount = state.breakaway.count;
-  const totalEarnings = state.breakaway.lifetimeEarnings + state.money;
+  const btcValue = Math.floor((state.bitcoin ? state.bitcoin.holdings : 0) * btcPrice);
+  const totalEarnings = state.breakaway.lifetimeEarnings + state.money + btcValue;
 
   // Preserve breakaway data
   const breakawayData = {
@@ -1483,6 +1581,7 @@ function tick(dtMs) {
   tickJuniors(dtHours);
   tickRival(dtHours);
   tickNpcs(dtHours);
+  tickBitcoin(dtHours);
 
   if (state.pipStrikes >= 3) {
     state.dismissed = true;
@@ -1900,7 +1999,8 @@ function renderBreakaway() {
 
   $("breakaway-count").textContent = state.breakaway.count;
   $("breakaway-mult").textContent = state.breakaway.multiplier.toFixed(2) + "x";
-  $("breakaway-earnings").textContent = "$" + Math.floor(state.breakaway.lifetimeEarnings + state.money);
+  const btcVal = Math.floor((state.bitcoin ? state.bitcoin.holdings : 0) * btcPrice);
+  $("breakaway-earnings").textContent = "$" + Math.floor(state.breakaway.lifetimeEarnings + state.money + btcVal);
 }
 
 function renderNpcs() {
@@ -1960,12 +2060,60 @@ function renderNpcs() {
   });
 }
 
+function renderBitcoin() {
+  // Price
+  const priceStr = btcPrice > 0
+    ? "$" + btcPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })
+    : "--";
+  $("btc-price").textContent = priceStr;
+
+  // Updated timestamp
+  const updEl = $("btc-updated");
+  if (btcPriceUpdatedAt > 0) {
+    const ago = Math.floor((now() - btcPriceUpdatedAt) / 1000);
+    updEl.textContent = ago < 10 ? "Price: just now" : `Price: ${ago}s ago`;
+    updEl.style.color = "#555";
+  } else if (btcFetchError) {
+    updEl.textContent = "Price: offline";
+    updEl.style.color = "#ff6f6f";
+  }
+
+  // Holdings
+  const holdings = state.bitcoin.holdings;
+  $("btc-holdings").textContent = holdings > 0 ? holdings.toFixed(6) : "0";
+
+  // Value
+  const value = Math.floor(holdings * btcPrice);
+  $("btc-value").textContent = "$" + value.toLocaleString();
+
+  // P&L
+  const pnl = value - Math.round(state.bitcoin.totalInvested);
+  const pnlEl = $("btc-pnl");
+  if (holdings <= 0) {
+    pnlEl.textContent = "$0";
+    pnlEl.className = "";
+  } else if (pnl >= 0) {
+    pnlEl.textContent = "+$" + pnl.toLocaleString();
+    pnlEl.className = "btc-profit";
+  } else {
+    pnlEl.textContent = "-$" + Math.abs(pnl).toLocaleString();
+    pnlEl.className = "btc-loss";
+  }
+
+  // Disable buttons when appropriate
+  $("btn-btc-buy-50").disabled = state.money < 50 || btcPrice <= 0;
+  $("btn-btc-buy-100").disabled = state.money < 100 || btcPrice <= 0;
+  $("btn-btc-sell-half").disabled = holdings <= 0 || btcPrice <= 0;
+  $("btn-btc-sell-all").disabled = holdings <= 0 || btcPrice <= 0;
+}
+
 function renderAll() {
   renderClock();
   renderStats();
   renderOffers();
   renderQueue();
   renderStore();
+  renderBitcoin();
   renderJuniors();
   renderRival();
   renderBreakaway();
@@ -1994,7 +2142,7 @@ function init() {
       "BREAK AWAY?\n\n" +
       "You'll leave the firm and start your own practice.\n" +
       "All progress resets to zero — rank, billables, reputation, everything.\n\n" +
-      `But you'll carry a permanent ${Math.round(((1 + 0.15 * (state.breakaway.count + 1) + Math.log2(1 + (state.breakaway.lifetimeEarnings + state.money) / 5000) * 0.1) - 1) * 100)}% bonus into your next run.\n\n` +
+      `But you'll carry a permanent ${Math.round(((1 + 0.15 * (state.breakaway.count + 1) + Math.log2(1 + (state.breakaway.lifetimeEarnings + state.money + Math.floor((state.bitcoin ? state.bitcoin.holdings : 0) * btcPrice)) / 5000) * 0.1) - 1) * 100)}% bonus into your next run.\n\n` +
       "Are you sure?"
     );
     if (confirmed) executeBreakaway();
@@ -2014,8 +2162,20 @@ function init() {
   if (!state.nextNpcSpawnAt) state.nextNpcSpawnAt = 0;
   if (state.apiConfig === undefined) state.apiConfig = null;
   if (state.money === undefined) { state.money = state.points || 0; delete state.points; }
+  if (!state.bitcoin) state.bitcoin = { holdings: 0, totalInvested: 0, lastPrice: 0, stressCheckPrice: 0, lastStressCheckAt: 0 };
 
   initSettingsUI();
+
+  // Bitcoin buttons
+  $("btn-btc-buy-50").addEventListener("click", () => buyBtc(50));
+  $("btn-btc-buy-100").addEventListener("click", () => buyBtc(100));
+  $("btn-btc-sell-half").addEventListener("click", () => sellBtc(0.5));
+  $("btn-btc-sell-all").addEventListener("click", () => sellBtc(1));
+
+  // Start fetching Bitcoin price
+  fetchBtcPrice();
+  setInterval(fetchBtcPrice, 60 * 1000); // Refresh every 60 seconds
+
   renderAll();
 
   setInterval(() => {
