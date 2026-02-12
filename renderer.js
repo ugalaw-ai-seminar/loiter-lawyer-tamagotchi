@@ -81,7 +81,7 @@ const defaultState = () => ({
     stress: 35
   },
 
-  points: 0,
+  money: 0,
   billables: 0,
 
   reputation: { lit: 0, corp: 0, reg: 0 },
@@ -118,7 +118,7 @@ const defaultState = () => ({
   breakaway: {
     count: 0,              // Number of times player has broken away
     multiplier: 1.0,       // Permanent multiplier from breakaways
-    lifetimeEarnings: 0    // Total points across all runs (used for multiplier calc)
+    lifetimeEarnings: 0    // Total money across all runs (used for multiplier calc)
   },
 
   // Work/family choice spiral
@@ -227,15 +227,17 @@ $("btn-coffee").addEventListener("click", () => {
 });
 
 $("btn-food").addEventListener("click", () => {
+  if (state.money < 15) { log("Not enough money for takeout. ($15)"); return; }
+  state.money -= 15;
   state.stats.hunger = clamp(state.stats.hunger + 40, 0, 100);
   state.stats.stress = clamp(state.stats.stress - 3, 0, 100);
 
   const lines = [
-    "Ordered takeout. Chinese again…",
-    "Ordered takeout. The delivery guy knows your floor by heart.",
-    "Ordered takeout. Ate over the keyboard like a professional.",
-    "Ordered takeout. It’s technically dinner if it arrives after midnight.",
-    "Ordered takeout. The receipt looks like a billing statement."
+    "Ordered takeout ($15). Chinese again…",
+    "Ordered takeout ($15). The delivery guy knows your floor by heart.",
+    "Ordered takeout ($15). Ate over the keyboard like a professional.",
+    "Ordered takeout ($15). It's technically dinner if it arrives after midnight.",
+    "Ordered takeout ($15). The receipt looks like a billing statement."
   ];
   log(randChoice(lines));
 });
@@ -247,10 +249,12 @@ $("btn-nap").addEventListener("click", () => {
 });
 
 $("btn-sin").addEventListener("click", () => {
+  if (state.money < 8) { log("Not enough money for a 'Sin' pouch. ($8)"); return; }
+  state.money -= 8;
   state._sinUntil = now() + 1000 * 60 * 60 * 6; // 6 hours
   state.stats.stress = clamp(state.stats.stress + 6, 0, 100);
   state.stats.sleep = clamp(state.stats.sleep - 6, 0, 100);
-  log("Used a 'Sin' pouch. Productivity up (6h), but sleep/stress take a hit.");
+  log("Used a 'Sin' pouch ($8). Productivity up (6h), but sleep/stress take a hit.");
 });
 
 $("btn-clear-finished").addEventListener("click", () => clearFinishedTasks());
@@ -258,7 +262,7 @@ $("btn-clear-finished").addEventListener("click", () => clearFinishedTasks());
 $("btn-probono").addEventListener("click", () => {
   const a = makeAssignment({ kind: "probono" });
   state.queue.push(a);
-  log("Accepted a pro bono matter. Low points, stress relief on completion.");
+  log("Accepted a pro bono matter. No pay, but stress relief on completion.");
 });
 
 $("btn-window").addEventListener("click", () => {
@@ -370,11 +374,11 @@ function buy(itemId) {
     log("Already owned.");
     return;
   }
-  if (state.points < item.cost) {
-    log("Not enough points.");
+  if (state.money < item.cost) {
+    log("Not enough money.");
     return;
   }
-  state.points -= item.cost;
+  state.money -= item.cost;
   applyItemEffect(item);
   log(`Purchased: ${item.name}.`);
   storeApi.reportPurchase(item.id, item.cost);
@@ -402,7 +406,7 @@ function renderStore() {
     div.innerHTML = `
       <div class="name">${item.name}${owned ? ' <span class="tag tag-done">Owned</span>' : ""}</div>
       <div class="desc">${item.description || ""}</div>
-      <button data-buy="${item.id}" ${owned ? "disabled" : ""}>${owned ? "Owned" : `Buy (${item.cost})`}</button>
+      <button data-buy="${item.id}" ${owned ? "disabled" : ""}>${owned ? "Owned" : `Buy ($${item.cost})`}</button>
     `;
     wrap.appendChild(div);
   }
@@ -672,11 +676,11 @@ function triggerRandomEvent() {
     {
       type: "work_family",
       name: "Partner email: 'Need this tonight.'",
-      a: { label: "Pull all-nighter (points)", effect: () => {
+      a: { label: "Pull all-nighter ($120)", effect: () => {
         state.stats.stress = clamp(state.stats.stress + 10, 0, 100);
         state.stats.sleep = clamp(state.stats.sleep - 10, 0, 100);
-        state.points += 120;
-        log("You chose the all-nighter. Points up, stress/sleep down.");
+        state.money += 120;
+        log("You chose the all-nighter. +$120, stress/sleep down.");
         choseWork();
       }},
       b: { label: "Negotiate deadline (safer)", effect: () => {
@@ -693,25 +697,25 @@ function triggerRandomEvent() {
     {
       type: "work_family",
       name: "Family conflict: date night vs urgent filing",
-      a: { label: "Skip date, file tonight (points)", effect: () => {
+      a: { label: "Skip date, file tonight ($90)", effect: () => {
         state.stats.stress = clamp(state.stats.stress + 8, 0, 100);
-        state.points += 90;
-        log("Career choice: more points, more stress.");
+        state.money += 90;
+        log("Career choice: +$90, more stress.");
         choseWork();
       }},
       b: { label: "Go on the date (stress down)", effect: () => {
         state.stats.stress = clamp(state.stats.stress - 10, 0, 100);
-        log("Family choice: stress down, no points.");
+        log("Family choice: stress down, no pay.");
         choseFamily();
       }}
     },
     {
       type: "work_family",
       name: "Child sick at childcare: pick up vs push through",
-      a: { label: "Push through (points)", effect: () => {
+      a: { label: "Push through ($110)", effect: () => {
         state.stats.stress = clamp(state.stats.stress + 10, 0, 100);
-        state.points += 110;
-        log("Pushed through. Points up, stress up.");
+        state.money += 110;
+        log("Pushed through. +$110, stress up.");
         choseWork();
       }},
       b: { label: "Pick up child (stress down)", effect: () => {
@@ -724,11 +728,11 @@ function triggerRandomEvent() {
     {
       type: "work_family",
       name: "Your daughter's dance recital is tonight. There's also a client dinner.",
-      a: { label: "Skip the recital, attend the dinner (points + rep)", effect: () => {
+      a: { label: "Skip the recital, attend the dinner ($100 + rep)", effect: () => {
         state.stats.stress = clamp(state.stats.stress + 6, 0, 100);
-        state.points += 100;
+        state.money += 100;
         state.reputation.corp += 5;
-        log("You went to the dinner. The partner was impressed. Your daughter wasn't.");
+        log("You went to the dinner. +$100, +rep. Your daughter wasn't impressed.");
         choseWork();
       }},
       b: { label: "Go to the recital (stress down)", effect: () => {
@@ -740,11 +744,11 @@ function triggerRandomEvent() {
     {
       type: "work_family",
       name: "Your son's baseball game is Saturday. A partner wants you in the office.",
-      a: { label: "Work Saturday (points)", effect: () => {
+      a: { label: "Work Saturday ($95)", effect: () => {
         state.stats.stress = clamp(state.stats.stress + 8, 0, 100);
         state.stats.sleep = clamp(state.stats.sleep - 4, 0, 100);
-        state.points += 95;
-        log("Another Saturday at the office. Your son hit a home run. You heard about it later.");
+        state.money += 95;
+        log("Another Saturday at the office. +$95. Your son hit a home run. You heard about it later.");
         choseWork();
       }},
       b: { label: "Go to the game (stress down)", effect: () => {
@@ -757,11 +761,11 @@ function triggerRandomEvent() {
     {
       type: "work_family",
       name: "Anniversary dinner tonight. But a deal is closing and the partner 'needs bodies.'",
-      a: { label: "Stay for the close (big points)", effect: () => {
+      a: { label: "Stay for the close ($140 + rep)", effect: () => {
         state.stats.stress = clamp(state.stats.stress + 12, 0, 100);
-        state.points += 140;
+        state.money += 140;
         state.reputation.corp += 4;
-        log("The deal closed at 2 AM. Your spouse ate alone. Again.");
+        log("The deal closed at 2 AM. +$140, +rep. Your spouse ate alone. Again.");
         choseWork();
       }},
       b: { label: "Go to dinner (stress down, risk rep)", effect: () => {
@@ -778,10 +782,10 @@ function triggerRandomEvent() {
     {
       type: "work_family",
       name: "Parent-teacher conference conflicts with a deposition prep session.",
-      a: { label: "Skip the conference (points)", effect: () => {
+      a: { label: "Skip the conference ($80)", effect: () => {
         state.stats.stress = clamp(state.stats.stress + 6, 0, 100);
-        state.points += 80;
-        log("Depo prep went well. The teacher sent a note home. You didn't read it.");
+        state.money += 80;
+        log("Depo prep went well. +$80. The teacher sent a note home. You didn't read it.");
         choseWork();
       }},
       b: { label: "Attend the conference (stress down)", effect: () => {
@@ -793,10 +797,10 @@ function triggerRandomEvent() {
     {
       type: "work_family",
       name: "Your best friend is in town for one night. There's a brief due tomorrow.",
-      a: { label: "Finish the brief (points)", effect: () => {
+      a: { label: "Finish the brief ($85)", effect: () => {
         state.stats.stress = clamp(state.stats.stress + 7, 0, 100);
-        state.points += 85;
-        log("Brief filed on time. Your friend texted 'maybe next time.' That was six months ago.");
+        state.money += 85;
+        log("Brief filed on time. +$85. Your friend texted 'maybe next time.' That was six months ago.");
         choseWork();
       }},
       b: { label: "Go see your friend (stress down)", effect: () => {
@@ -809,11 +813,11 @@ function triggerRandomEvent() {
     {
       type: "work_family",
       name: "Thanksgiving. The family expects you home. The partner expects a draft by Friday.",
-      a: { label: "Work through the holiday (big points)", effect: () => {
+      a: { label: "Work through the holiday ($150)", effect: () => {
         state.stats.stress = clamp(state.stats.stress + 14, 0, 100);
         state.stats.sleep = clamp(state.stats.sleep - 6, 0, 100);
-        state.points += 150;
-        log("You billed on Thanksgiving. The office was empty except for you and the cleaning crew.");
+        state.money += 150;
+        log("You billed on Thanksgiving. +$150. The office was empty except for you and the cleaning crew.");
         choseWork();
       }},
       b: { label: "Go home for Thanksgiving (stress way down)", effect: () => {
@@ -951,9 +955,9 @@ function tickJuniors(dtHours) {
     if (j.progress >= 1 && !j.completed) {
       j.completed = true;
       const bonus = Math.round(j.points * state.breakaway.multiplier);
-      state.points += bonus;
+      state.money += bonus;
       state.billables += j.billableHours * 0.3; // Partial billable credit for delegation
-      log(`${j.name} completed "${j.task}." Delegation bonus: +${bonus} points.`);
+      log(`${j.name} completed "${j.task}." Delegation bonus: +$${bonus}.`);
     }
   }
 
@@ -1057,7 +1061,7 @@ function executeBreakaway() {
 
   const oldMultiplier = state.breakaway.multiplier;
   const oldCount = state.breakaway.count;
-  const totalEarnings = state.breakaway.lifetimeEarnings + state.points;
+  const totalEarnings = state.breakaway.lifetimeEarnings + state.money;
 
   // Preserve breakaway data
   const breakawayData = {
@@ -1323,7 +1327,7 @@ function interactNpc(npcId, choice) {
   if (eff.caffeine) state.stats.caffeine = clamp(state.stats.caffeine + eff.caffeine, 0, 100);
   if (eff.hunger) state.stats.hunger = clamp(state.stats.hunger + eff.hunger, 0, 100);
   if (eff.sleep) state.stats.sleep = clamp(state.stats.sleep + eff.sleep, 0, 100);
-  if (eff.points) state.points += eff.points;
+  if (eff.points) state.money += eff.points;
   if (eff.repLit) state.reputation.lit += eff.repLit;
   if (eff.repCorp) state.reputation.corp += eff.repCorp;
   if (eff.repReg) state.reputation.reg += eff.repReg;
@@ -1444,7 +1448,7 @@ function tick(dtMs) {
       a._completed = true;
 
       const earnedPoints = Math.round(a.points * state.breakaway.multiplier);
-      state.points += earnedPoints;
+      state.money += earnedPoints;
 
       state.stats.stress = clamp(state.stats.stress + (a.stressImpact * 0.2), 0, 100);
       if (a.kind === "probono") state.stats.stress = clamp(state.stats.stress - 10, 0, 100);
@@ -1459,7 +1463,7 @@ function tick(dtMs) {
       if (a.kind === "reg") state.reputation.reg += repGain;
       if (a.kind === "probono") state.reputation.reg += 2;
 
-      log(`Completed: ${a.title}. +${earnedPoints} points, +rep.`);
+      log(`Completed: ${a.title}. +$${earnedPoints}, +rep.`);
     }
   }
 
@@ -1520,7 +1524,7 @@ function renderStats() {
   $("val-sleep").textContent = Math.round(s.sleep);
   $("val-stress").textContent = Math.round(s.stress);
 
-  $("points").textContent = Math.floor(state.points).toString();
+  $("points").textContent = "$" + Math.floor(state.money).toString();
   $("billables").textContent = Math.floor(state.billables).toString();
   $("pip").textContent = state.pipStrikes.toString();
 
@@ -1561,7 +1565,7 @@ function renderOffers() {
       </div>
       <div class="mini">
         <div>${o.billableHours}h billables</div>
-        <div>+${o.points} points</div>
+        <div>+$${o.points}</div>
       </div>
     `;
     wrap.appendChild(card);
@@ -1605,7 +1609,7 @@ function renderQueue() {
       </div>
       <div class="mini">
         <div>${Math.floor(a.billablesEarned)}/${a.billableHours}h</div>
-        <div>${a.points} pts</div>
+        <div>$${a.points}</div>
       </div>
       <div class="progress"><div class="pfill" style="width:${pct}%"></div></div>
     `;
@@ -1829,7 +1833,7 @@ function renderJuniors() {
       </div>
       <div class="junior-task">${j.task} (${j.kind.toUpperCase()})</div>
       <div class="junior-meta">
-        <span>${j.billableHours}h • +${j.points} pts bonus</span>
+        <span>${j.billableHours}h • +$${j.points} bonus</span>
         <span>Due: ${dl}</span>
       </div>
       ${j.assigned && !j.completed && !j.missed
@@ -1896,7 +1900,7 @@ function renderBreakaway() {
 
   $("breakaway-count").textContent = state.breakaway.count;
   $("breakaway-mult").textContent = state.breakaway.multiplier.toFixed(2) + "x";
-  $("breakaway-earnings").textContent = Math.floor(state.breakaway.lifetimeEarnings + state.points);
+  $("breakaway-earnings").textContent = "$" + Math.floor(state.breakaway.lifetimeEarnings + state.money);
 }
 
 function renderNpcs() {
@@ -1990,7 +1994,7 @@ function init() {
       "BREAK AWAY?\n\n" +
       "You'll leave the firm and start your own practice.\n" +
       "All progress resets to zero — rank, billables, reputation, everything.\n\n" +
-      `But you'll carry a permanent ${Math.round(((1 + 0.15 * (state.breakaway.count + 1) + Math.log2(1 + (state.breakaway.lifetimeEarnings + state.points) / 5000) * 0.1) - 1) * 100)}% bonus into your next run.\n\n` +
+      `But you'll carry a permanent ${Math.round(((1 + 0.15 * (state.breakaway.count + 1) + Math.log2(1 + (state.breakaway.lifetimeEarnings + state.money) / 5000) * 0.1) - 1) * 100)}% bonus into your next run.\n\n` +
       "Are you sure?"
     );
     if (confirmed) executeBreakaway();
@@ -2009,6 +2013,7 @@ function init() {
   if (!state.npcs) state.npcs = [];
   if (!state.nextNpcSpawnAt) state.nextNpcSpawnAt = 0;
   if (state.apiConfig === undefined) state.apiConfig = null;
+  if (state.money === undefined) { state.money = state.points || 0; delete state.points; }
 
   initSettingsUI();
   renderAll();
