@@ -20,6 +20,12 @@ const RANKS = [
   { name: "Partner", billables: 3600, rep: 600 }
 ];
 
+const PERK_DEFS = [
+  { id: "nightOwl",     name: "Night Owl",     cost: 600,  rankReq: 1, desc: "Sleep penalty on productivity reduced by 45%." },
+  { id: "masterBiller", name: "Master Biller", cost: 1200, rankReq: 2, desc: "+12% billable hours earned on completed tasks." },
+  { id: "goldenVoice",  name: "Golden Voice",  cost: 1800, rankReq: 3, desc: "+25% reputation gain on litigation assignments." }
+];
+
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 function now() { return Date.now(); }
 
@@ -209,22 +215,61 @@ $("btn-new").addEventListener("click", () => {
   renderAll();
 });
 
-function bindPerks() {
-  $("perk-nightowl").checked = state.perks.nightOwl;
-  $("perk-masterbiller").checked = state.perks.masterBiller;
-  $("perk-goldenvoice").checked = state.perks.goldenVoice;
+function buyPerk(perkId) {
+  const def = PERK_DEFS.find(p => p.id === perkId);
+  if (!def) return;
+  if (state.perks[perkId]) { log("Already owned."); return; }
+  if (rankIndex() < def.rankReq) { log(`Requires rank: ${RANKS[def.rankReq].name}.`); return; }
+  if (state.money < def.cost) { log("Not enough money."); return; }
+  state.money -= def.cost;
+  state.perks[perkId] = true;
+  log(`Perk unlocked: ${def.name}!`);
+  renderAll();
+}
 
-  $("perk-nightowl").addEventListener("change", (e) => {
-    state.perks.nightOwl = !!e.target.checked;
-    log(`Perk toggled: Night Owl = ${state.perks.nightOwl}`);
-  });
-  $("perk-masterbiller").addEventListener("change", (e) => {
-    state.perks.masterBiller = !!e.target.checked;
-    log(`Perk toggled: Master Biller = ${state.perks.masterBiller}`);
-  });
-  $("perk-goldenvoice").addEventListener("change", (e) => {
-    state.perks.goldenVoice = !!e.target.checked;
-    log(`Perk toggled: Golden Voice = ${state.perks.goldenVoice}`);
+function renderPerks() {
+  const wrap = $("perk-list");
+  wrap.innerHTML = "";
+  const ri = rankIndex();
+
+  for (const def of PERK_DEFS) {
+    const owned = !!state.perks[def.id];
+    const meetsRank = ri >= def.rankReq;
+    const canAfford = state.money >= def.cost;
+
+    const card = document.createElement("div");
+    card.className = "perk-card" + (owned ? " owned" : "") + (!meetsRank ? " locked" : "");
+
+    let statusHtml = "";
+    if (owned) {
+      statusHtml = '<span class="perk-status perk-active">Active</span>';
+    } else if (!meetsRank) {
+      statusHtml = '<span class="perk-status perk-locked-tag">Locked</span>';
+    }
+
+    let reqText = `Requires: ${RANKS[def.rankReq].name}`;
+    if (!meetsRank) reqText += " (not yet reached)";
+
+    let buttonHtml = "";
+    if (!owned) {
+      if (!meetsRank) {
+        buttonHtml = `<button disabled>Locked — ${RANKS[def.rankReq].name}</button>`;
+      } else {
+        buttonHtml = `<button class="btn-buy-perk" data-perk="${def.id}" ${!canAfford ? "disabled" : ""}>Buy ($${def.cost})</button>`;
+      }
+    }
+
+    card.innerHTML = `
+      <div class="perk-name">${def.name} ${statusHtml}</div>
+      <div class="perk-desc">${def.desc}</div>
+      <div class="perk-req">${reqText} · $${def.cost}</div>
+      ${buttonHtml}
+    `;
+    wrap.appendChild(card);
+  }
+
+  wrap.querySelectorAll("[data-perk]").forEach(btn => {
+    btn.addEventListener("click", () => buyPerk(btn.getAttribute("data-perk")));
   });
 }
 
@@ -2113,6 +2158,7 @@ function renderAll() {
   renderOffers();
   renderQueue();
   renderStore();
+  renderPerks();
   renderBitcoin();
   renderJuniors();
   renderRival();
@@ -2132,7 +2178,6 @@ function saveSilent() {
 
 function init() {
   seedOffers();
-  bindPerks();
   loadStoreCatalog();
 
   // Breakaway button
@@ -2163,6 +2208,7 @@ function init() {
   if (state.apiConfig === undefined) state.apiConfig = null;
   if (state.money === undefined) { state.money = state.points || 0; delete state.points; }
   if (!state.bitcoin) state.bitcoin = { holdings: 0, totalInvested: 0, lastPrice: 0, stressCheckPrice: 0, lastStressCheckAt: 0 };
+  if (!state.perks) state.perks = { nightOwl: false, masterBiller: false, goldenVoice: false };
 
   initSettingsUI();
 
