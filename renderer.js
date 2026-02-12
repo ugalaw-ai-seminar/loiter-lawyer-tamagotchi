@@ -26,6 +26,39 @@ const PERK_DEFS = [
   { id: "goldenVoice",  name: "Golden Voice",  cost: 1800, rankReq: 3, desc: "+25% reputation gain on litigation assignments." }
 ];
 
+const ACHIEVEMENT_DEFS = [
+  // Progression
+  { id: "first_billing",    name: "Billable Hour",       desc: "Complete your first assignment.",     check: () => state.billables > 0 },
+  { id: "century_club",     name: "Century Club",        desc: "Bill 100 lifetime hours.",            check: () => state.billables >= 100 },
+  { id: "billing_machine",  name: "Billing Machine",     desc: "Bill 1,000 lifetime hours.",          check: () => state.billables >= 1000 },
+  { id: "rank_1",           name: "Moving Up",           desc: "Reach Midlevel Associate.",           check: () => rankIndex() >= 1 },
+  { id: "rank_2",           name: "Senior Material",     desc: "Reach Senior Associate.",             check: () => rankIndex() >= 2 },
+  { id: "rank_3",           name: "On Track",            desc: "Reach Counsel (Partner Track).",      check: () => rankIndex() >= 3 },
+  { id: "rank_4",           name: "Made Partner",        desc: "Reach Partner.",                      check: () => rankIndex() >= 4 },
+  // Money
+  { id: "first_grand",      name: "First Grand",        desc: "Have $1,000 at once.",                check: () => state.money >= 1000 },
+  { id: "five_figures",     name: "Five Figures",        desc: "Have $10,000 at once.",               check: () => state.money >= 10000 },
+  // Survival
+  { id: "all_nighter",      name: "All-Nighter",        desc: "Sleep drops below 10.",               check: () => state.stats.sleep < 10 },
+  { id: "meltdown",         name: "Meltdown",           desc: "Stress exceeds 95.",                  check: () => state.stats.stress > 95 },
+  { id: "wired",            name: "Wired",              desc: "Max out caffeine.",                   check: () => state.stats.caffeine >= 100 },
+  { id: "starving",         name: "Starving Artist",    desc: "Hunger drops below 10.",              check: () => state.stats.hunger < 10 },
+  // Life events
+  { id: "divorced",         name: "Irreconcilable",     desc: "Get divorced.",                       check: () => state.divorced === true },
+  { id: "burnout",          name: "Burned Out",         desc: "Experience burnout.",                  check: () => state.burnout === true },
+  { id: "pip_strike",       name: "On Thin Ice",        desc: "Receive a PIP strike.",               check: () => state.pipStrikes >= 1 },
+  // Bitcoin
+  { id: "crypto_curious",   name: "Crypto Curious",     desc: "Buy Bitcoin for the first time.",     check: () => state.bitcoin && state.bitcoin.totalInvested > 0 },
+  { id: "diamond_hands",    name: "Diamond Hands",      desc: "Hold $1,000+ in Bitcoin.",            check: () => state.bitcoin && state.bitcoin.holdings * (btcPrice || state.bitcoin.lastPrice) >= 1000 },
+  // Prestige
+  { id: "breakaway_1",      name: "Fresh Start",        desc: "Complete a breakaway.",               check: () => state.breakaway.count >= 1 },
+  { id: "breakaway_3",      name: "Serial Entrepreneur", desc: "Complete 3 breakaways.",             check: () => state.breakaway.count >= 3 },
+  // Perks & store
+  { id: "buy_perk",         name: "Self-Investment",    desc: "Unlock any perk.",                    check: () => state.perks.nightOwl || state.perks.masterBiller || state.perks.goldenVoice },
+  { id: "all_perks",        name: "Fully Loaded",       desc: "Unlock all three perks.",             check: () => state.perks.nightOwl && state.perks.masterBiller && state.perks.goldenVoice },
+  { id: "buy_item",         name: "Retail Therapy",     desc: "Buy something from the store.",       check: () => state.lawyer.outfit.hat || state.lawyer.outfit.tie || state.lawyer.outfit.casualFridays || state.store.fridge || state.store.coffeeMaker || state.store.desk },
+];
+
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 function now() { return Date.now(); }
 
@@ -148,7 +181,10 @@ const defaultState = () => ({
     lastPrice: 0,           // Last known BTC price (persisted for offline fallback)
     stressCheckPrice: 0,    // Price at last stress effect check
     lastStressCheckAt: 0    // Timestamp of last stress check
-  }
+  },
+
+  // Achievements (persisted across breakaways)
+  achievements: []          // Array of { id, unlockedAt }
 });
 
 let state = load() || defaultState();
@@ -271,6 +307,48 @@ function renderPerks() {
   wrap.querySelectorAll("[data-perk]").forEach(btn => {
     btn.addEventListener("click", () => buyPerk(btn.getAttribute("data-perk")));
   });
+}
+
+// ---------- Achievements ----------
+
+let achPanelOpen = false;
+
+function checkAchievements() {
+  if (!state.achievements) state.achievements = [];
+  const unlocked = new Set(state.achievements.map(a => a.id));
+  let newlyUnlocked = false;
+
+  for (const def of ACHIEVEMENT_DEFS) {
+    if (unlocked.has(def.id)) continue;
+    try {
+      if (def.check()) {
+        state.achievements.push({ id: def.id, unlockedAt: now() });
+        log(`Achievement unlocked: ${def.name}!`);
+        newlyUnlocked = true;
+      }
+    } catch (_) { /* check may reference missing state fields */ }
+  }
+
+  if (newlyUnlocked) renderAchievements();
+}
+
+function renderAchievements() {
+  const total = ACHIEVEMENT_DEFS.length;
+  const unlocked = state.achievements ? state.achievements.length : 0;
+  $("ach-header-count").textContent = `(${unlocked}/${total})`;
+
+  const wrap = $("ach-list");
+  wrap.innerHTML = "";
+
+  const unlockedIds = new Set((state.achievements || []).map(a => a.id));
+
+  for (const def of ACHIEVEMENT_DEFS) {
+    const earned = unlockedIds.has(def.id);
+    const div = document.createElement("div");
+    div.className = "ach-item" + (earned ? " earned" : "");
+    div.innerHTML = `<span class="ach-name">${earned ? def.name : "???"}</span><span class="ach-desc">${earned ? def.desc : "Keep playing to find out."}</span>`;
+    wrap.appendChild(div);
+  }
 }
 
 // ---------- Assistant actions ----------
@@ -1213,9 +1291,13 @@ function executeBreakaway() {
     multiplier: 1 // recalculated below
   };
 
+  // Preserve achievements across breakaways
+  const savedAchievements = state.achievements ? [...state.achievements] : [];
+
   // Reset to fresh state
   const fresh = defaultState();
   fresh.breakaway = breakawayData;
+  fresh.achievements = savedAchievements;
   fresh.breakaway.multiplier = calculateBreakawayMultiplier.call(null);
   // Recalculate with the updated breakaway state
   fresh.breakaway.multiplier = 1 + (0.15 * fresh.breakaway.count) + (Math.log2(1 + fresh.breakaway.lifetimeEarnings / 5000) * 0.1);
@@ -1643,6 +1725,8 @@ function tick(dtMs) {
     state.pipStrikes += 1;
     log("Critical condition persisted. HR is 'circling back' (PIP strike).");
   }
+
+  checkAchievements();
 }
 
 function rankName() {
@@ -2159,6 +2243,7 @@ function renderAll() {
   renderQueue();
   renderStore();
   renderPerks();
+  renderAchievements();
   renderBitcoin();
   renderJuniors();
   renderRival();
@@ -2179,6 +2264,13 @@ function saveSilent() {
 function init() {
   seedOffers();
   loadStoreCatalog();
+
+  // Achievement panel toggle
+  $("btn-toggle-ach").addEventListener("click", () => {
+    achPanelOpen = !achPanelOpen;
+    $("ach-list").style.display = achPanelOpen ? "flex" : "none";
+    $("btn-toggle-ach").textContent = achPanelOpen ? "Hide" : "Show";
+  });
 
   // Breakaway button
   $("btn-breakaway").addEventListener("click", () => {
@@ -2209,6 +2301,7 @@ function init() {
   if (state.money === undefined) { state.money = state.points || 0; delete state.points; }
   if (!state.bitcoin) state.bitcoin = { holdings: 0, totalInvested: 0, lastPrice: 0, stressCheckPrice: 0, lastStressCheckAt: 0 };
   if (!state.perks) state.perks = { nightOwl: false, masterBiller: false, goldenVoice: false };
+  if (!state.achievements) state.achievements = [];
 
   initSettingsUI();
 

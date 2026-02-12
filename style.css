@@ -83,6 +83,20 @@ button:disabled { opacity:0.45; cursor:not-allowed; }
 .perk-card button { width:100%; margin-top:8px; font-size:12px; padding:6px 10px; }
 .perk-card button.btn-buy-perk { background:#1a2a3a; border-color:#2b4a5a; color:var(--accent); }
 .perk-card button.btn-buy-perk:hover { border-color:var(--accent); }
+
+/* Achievements */
+.ach-header { display:flex; justify-content:space-between; align-items:center; }
+.ach-header h2 { margin:0 0 10px; }
+.ach-header button { font-size:11px; padding:4px 10px; }
+.ach-count { font-size:12px; font-weight:400; color:var(--muted); }
+.ach-list { display:flex; flex-direction:column; gap:4px; border:1px solid #252a36; border-radius:10px; background:#10131a; padding:10px; margin-bottom:10px; max-height:240px; overflow:auto; }
+.ach-item { display:flex; justify-content:space-between; align-items:baseline; gap:8px; padding:5px 8px; border-radius:6px; font-size:11px; color:#555; border:1px solid transparent; }
+.ach-item.earned { color:var(--text); background:#0d1210; border-color:#1a3a2a; }
+.ach-name { font-weight:700; white-space:nowrap; }
+.ach-item.earned .ach-name { color:#6fff9a; }
+.ach-desc { text-align:right; color:var(--muted); font-size:10px; }
+.ach-item:not(.earned) .ach-desc { color:#333; }
+
 .log { border:1px solid #252a36; border-radius:10px; background:#0b0c10; padding:10px; height:180px; overflow:auto; font-size:12px; color: var(--muted); }
 .log .entry { margin-bottom:6px; }
 
