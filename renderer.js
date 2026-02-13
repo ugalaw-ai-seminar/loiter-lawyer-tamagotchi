@@ -88,6 +88,45 @@ function now() { return Date.now(); }
 
 function isFriday(ts) { return new Date(ts).getDay() === 5; } // 0 Sun ... 5 Fri
 
+// --- Holiday date helpers ---
+
+function easterSunday(year) {
+  // Anonymous Gregorian algorithm
+  const a = year % 19, b = Math.floor(year / 100), c = year % 100;
+  const d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4), k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31) - 1; // 0-indexed
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(year, month, day);
+}
+
+function laborDay(year) {
+  // First Monday of September
+  const d = new Date(year, 8, 1); // Sep 1
+  while (d.getDay() !== 1) d.setDate(d.getDate() + 1);
+  return d;
+}
+
+function thanksgivingDay(year) {
+  // Fourth Thursday of November
+  const d = new Date(year, 10, 1); // Nov 1
+  while (d.getDay() !== 4) d.setDate(d.getDate() + 1);
+  d.setDate(d.getDate() + 21); // 4th occurrence
+  return d;
+}
+
+function isSameDay(ts, date) {
+  const d = new Date(ts);
+  return d.getFullYear() === date.getFullYear() &&
+    d.getMonth() === date.getMonth() &&
+    d.getDate() === date.getDate();
+}
+
+function isCincoDeMayo(ts) { const d = new Date(ts); return d.getMonth() === 4 && d.getDate() === 5; }
+
 function nextChristmasPartyTimestamp(fromTs) {
   // Thursday before Dec 25 (real-world). If already passed this year's party, compute next year's.
   const d = new Date(fromTs);
@@ -215,6 +254,9 @@ const defaultState = () => ({
 
   // Achievements (persisted across breakaways)
   achievements: [],         // Array of { id, unlockedAt }
+
+  // Holidays triggered this year (array of "holiday_YYYY" strings)
+  holidaysTriggered: [],
 
   // Minigame boosts & stats
   minigameBoost: {
@@ -385,13 +427,24 @@ $("btn-food").addEventListener("click", () => {
   state.stats.hunger = clamp(state.stats.hunger + 40, 0, 100);
   state.stats.stress = clamp(state.stats.stress - 3, 0, 100);
 
-  const lines = [
-    "Ordered takeout ($15). Chinese again…",
-    "Ordered takeout ($15). The delivery guy knows your floor by heart.",
-    "Ordered takeout ($15). Ate over the keyboard like a professional.",
-    "Ordered takeout ($15). It's technically dinner if it arrives after midnight.",
-    "Ordered takeout ($15). The receipt looks like a billing statement."
-  ];
+  let lines;
+  if (isCincoDeMayo(now())) {
+    lines = [
+      "Ordered takeout ($15). Tacos al pastor — the only good decision you've made today.",
+      "Ordered takeout ($15). Enchiladas from the spot down the block. Feliz Cinco de Mayo.",
+      "Ordered takeout ($15). Burrito the size of a deposition transcript. No complaints.",
+      "Ordered takeout ($15). Chips, guac, and a brief moment of happiness. Viva.",
+      "Ordered takeout ($15). Tamales from somebody's abuela. Best billable hour of your life."
+    ];
+  } else {
+    lines = [
+      "Ordered takeout ($15). Chinese again…",
+      "Ordered takeout ($15). The delivery guy knows your floor by heart.",
+      "Ordered takeout ($15). Ate over the keyboard like a professional.",
+      "Ordered takeout ($15). It's technically dinner if it arrives after midnight.",
+      "Ordered takeout ($15). The receipt looks like a billing statement."
+    ];
+  }
   log(randChoice(lines));
 });
 
@@ -1605,6 +1658,93 @@ function tickNpcs(dtHours) {
   }
 }
 
+// ---------- Holidays ----------
+
+function holidayKey(id) {
+  return id + "_" + new Date().getFullYear();
+}
+
+function holidayFired(id) {
+  if (!state.holidaysTriggered) state.holidaysTriggered = [];
+  return state.holidaysTriggered.includes(holidayKey(id));
+}
+
+function fireHoliday(id) {
+  if (!state.holidaysTriggered) state.holidaysTriggered = [];
+  state.holidaysTriggered.push(holidayKey(id));
+}
+
+function tickHolidays() {
+  const t = now();
+  const d = new Date(t);
+  const year = d.getFullYear();
+  const month = d.getMonth(); // 0-indexed
+  const day = d.getDate();
+
+  // Valentine's Day — Feb 14
+  if (month === 1 && day === 14 && !holidayFired("valentines")) {
+    fireHoliday("valentines");
+    if (state.divorced) {
+      log("Happy Valentine's Day. The only thing you hate more than your ex-wife is billing hours.");
+    } else {
+      log("Happy Valentine's Day. The only thing you love more than your wife is talking about contracts.");
+    }
+    state.stats.stress = clamp(state.stats.stress + (state.divorced ? 6 : 3), 0, 100);
+  }
+
+  // Easter — variable Sunday
+  const easter = easterSunday(year);
+  if (isSameDay(t, easter) && !holidayFired("easter")) {
+    fireHoliday("easter");
+    log("Happy Easter. Just another Sunday.");
+  }
+
+  // Cinco de Mayo — May 5
+  if (month === 4 && day === 5 && !holidayFired("cincodemayo")) {
+    fireHoliday("cincodemayo");
+    log("Feliz Cinco de Mayo! The taqueria down the block is doing two-for-one. All takeout today is Mexican.");
+    state.stats.stress = clamp(state.stats.stress - 3, 0, 100);
+  }
+
+  // Independence Day — July 4
+  if (month === 6 && day === 4 && !holidayFired("july4")) {
+    fireHoliday("july4");
+    log("Happy 4th of July! It's a great day for freedom. Well, not for you…");
+    state.stats.stress = clamp(state.stats.stress + 4, 0, 100);
+  }
+
+  // Labor Day — First Monday of September
+  const labor = laborDay(year);
+  if (isSameDay(t, labor) && !holidayFired("laborday")) {
+    fireHoliday("laborday");
+    log("Happy Labor Day. Thank God for the unions who fight for the workers — they give you more work to bill…");
+    state.stats.stress = clamp(state.stats.stress + 2, 0, 100);
+  }
+
+  // Halloween — Oct 31
+  if (month === 9 && day === 31 && !holidayFired("halloween")) {
+    fireHoliday("halloween");
+    log("Happy Halloween. You thought that motion to dismiss on your desk was a pink slip. Scariest thing you've seen all season…");
+    state.stats.stress = clamp(state.stats.stress + 8, 0, 100);
+  }
+
+  // Thanksgiving — 4th Thursday of November
+  const tg = thanksgivingDay(year);
+  if (isSameDay(t, tg) && !holidayFired("thanksgiving")) {
+    fireHoliday("thanksgiving");
+    log("Happy Thanksgiving. Be grateful today — who else but the firm would let you work today?");
+    state.stats.hunger = clamp(state.stats.hunger + 15, 0, 100);
+    state.stats.stress = clamp(state.stats.stress - 5, 0, 100);
+  }
+
+  // Christmas Day — Dec 25
+  if (month === 11 && day === 25 && !holidayFired("christmas")) {
+    fireHoliday("christmas");
+    log("Merry Christmas. You and the other associates are getting stuck in the snow… of some sort…");
+    state.stats.stress = clamp(state.stats.stress - 4, 0, 100);
+  }
+}
+
 // ---------- Simulation ----------
 function productivityMultiplier() {
   const { hunger, caffeine, sleep, stress } = state.stats;
@@ -1746,6 +1886,9 @@ function tick(dtMs) {
     log("Office Christmas party (Thursday before Christmas). Stress melts away—for one night.");
     state.nextChristmasPartyAt = nextChristmasPartyTimestamp(now());
   }
+
+  // Holiday flavor text
+  tickHolidays();
 
   // Arc ticks
   tickJuniors(dtHours);
@@ -2791,6 +2934,7 @@ function init() {
   if (!state.perkProgress) state.perkProgress = { nightOwlTasks: 0, litTasksCompleted: 0 };
   if (!state.achievements) state.achievements = [];
   if (!state.minigameBoost) state.minigameBoost = { litBoostUntil: 0, corpBoostUntil: 0, gamesPlayed: 0, gamesWon: 0 };
+  if (!state.holidaysTriggered) state.holidaysTriggered = [];
 
   initSettingsUI();
 
