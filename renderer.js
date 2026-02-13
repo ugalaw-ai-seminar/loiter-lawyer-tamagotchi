@@ -78,6 +78,9 @@ const ACHIEVEMENT_DEFS = [
   { id: "buy_perk",         name: "Self-Investment",    desc: "Earn any perk.",                      check: () => state.perks.nightOwl || state.perks.masterBiller || state.perks.goldenVoice },
   { id: "all_perks",        name: "Fully Loaded",       desc: "Earn all three perks.",               check: () => state.perks.nightOwl && state.perks.masterBiller && state.perks.goldenVoice },
   { id: "buy_item",         name: "Retail Therapy",     desc: "Buy something from the store.",       check: () => state.lawyer.outfit.hat || state.lawyer.outfit.tie || state.lawyer.outfit.casualFridays || state.store.fridge || state.store.coffeeMaker || state.store.desk },
+  // Minigames
+  { id: "first_minigame",   name: "Recess",              desc: "Win your first minigame.",            check: () => state.minigameBoost && state.minigameBoost.gamesWon >= 1 },
+  { id: "minigame_5",       name: "Corner Office Arcade", desc: "Win 5 minigames.",                   check: () => state.minigameBoost && state.minigameBoost.gamesWon >= 5 },
 ];
 
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
@@ -211,10 +214,22 @@ const defaultState = () => ({
   },
 
   // Achievements (persisted across breakaways)
-  achievements: []          // Array of { id, unlockedAt }
+  achievements: [],         // Array of { id, unlockedAt }
+
+  // Minigame boosts & stats
+  minigameBoost: {
+    litBoostUntil: 0,       // Timestamp: litigation productivity boost active until
+    corpBoostUntil: 0,      // Timestamp: corporate/negotiation productivity boost active until
+    gamesPlayed: 0,         // Total minigames played
+    gamesWon: 0             // Total minigames won
+  }
 });
 
 let state = load() || defaultState();
+
+// Minigame tracking (declared early, used by tick and minigame systems)
+let minigameActive = false;
+let pendingMinigame = null;  // "lit" or "corp"
 
 // ---------- Canvas ----------
 const canvas = $("scene");
@@ -1297,13 +1312,18 @@ function executeBreakaway() {
     multiplier: 1 // recalculated below
   };
 
-  // Preserve achievements across breakaways
+  // Preserve achievements and minigame stats across breakaways
   const savedAchievements = state.achievements ? [...state.achievements] : [];
+  const savedMinigameStats = state.minigameBoost
+    ? { gamesPlayed: state.minigameBoost.gamesPlayed, gamesWon: state.minigameBoost.gamesWon }
+    : { gamesPlayed: 0, gamesWon: 0 };
 
   // Reset to fresh state
   const fresh = defaultState();
   fresh.breakaway = breakawayData;
   fresh.achievements = savedAchievements;
+  fresh.minigameBoost.gamesPlayed = savedMinigameStats.gamesPlayed;
+  fresh.minigameBoost.gamesWon = savedMinigameStats.gamesWon;
   fresh.breakaway.multiplier = calculateBreakawayMultiplier.call(null);
   // Recalculate with the updated breakaway state
   fresh.breakaway.multiplier = 1 + (0.15 * fresh.breakaway.count) + (Math.log2(1 + fresh.breakaway.lifetimeEarnings / 5000) * 0.1);
@@ -1607,6 +1627,12 @@ function productivityMultiplier() {
   // Burnout: massive productivity penalty
   if (state.burnout && state.burnoutUntil > now()) mult *= 0.35;
 
+  // Minigame boost: +20% when active
+  if (state.minigameBoost) {
+    if (state.minigameBoost.litBoostUntil > now()) mult *= 1.20;
+    if (state.minigameBoost.corpBoostUntil > now()) mult *= 1.20;
+  }
+
   return mult;
 }
 
@@ -1701,6 +1727,11 @@ function tick(dtMs) {
       checkPerkUnlocks();
 
       log(`Completed: ${a.title}. +$${earnedPoints}, +rep.`);
+
+      // ~30% chance to trigger a minigame on lit or corp completion
+      if ((a.kind === "lit" || a.kind === "corp") && Math.random() < 0.30 && !minigameActive) {
+        pendingMinigame = a.kind;
+      }
     }
   }
 
@@ -1769,9 +1800,11 @@ function renderStats() {
   $("pip").textContent = state.pipStrikes.toString();
 
   const prod = productivityMultiplier();
-  const prodLabel = state.breakaway.multiplier > 1
+  const boostActive = state.minigameBoost && (state.minigameBoost.litBoostUntil > now() || state.minigameBoost.corpBoostUntil > now());
+  let prodLabel = state.breakaway.multiplier > 1
     ? `${Math.round(prod * 100)}% (${state.breakaway.multiplier.toFixed(2)}x prestige)`
     : `${Math.round(prod * 100)}%`;
+  if (boostActive) prodLabel += " [BOOSTED]";
   $("prod").textContent = prodLabel;
 
   $("rep-lit").textContent = Math.floor(state.reputation.lit);
@@ -2265,6 +2298,448 @@ function renderAll() {
   drawScene();
 }
 
+// ---------- Minigames ----------
+
+let minigameLoop = null;     // animation frame or interval ID
+let minigameKeyHandler = null;
+
+const mgCanvas = () => $("minigame-canvas");
+const mgCtx = () => mgCanvas().getContext("2d");
+
+function showMinigamePrompt(kind) {
+  const overlay = $("minigame-overlay");
+  const prompt = $("minigame-prompt");
+  const result = $("minigame-result");
+  const scoreEl = $("minigame-score");
+  const controls = $("minigame-controls");
+
+  overlay.style.display = "flex";
+  prompt.style.display = "";
+  result.style.display = "none";
+  scoreEl.textContent = "";
+
+  if (kind === "lit") {
+    $("minigame-title").textContent = "Paper Blitz";
+    $("minigame-prompt-text").innerHTML =
+      "A litigation assignment is complete! Time to celebrate.<br>" +
+      "Fire legal briefs at the descending jurors. Hit enough to earn a <strong style='color:#6fff9a'>+20% productivity boost</strong> for 6 hours.";
+    controls.textContent = "Arrow keys to move, Space to fire";
+  } else {
+    $("minigame-title").textContent = "Contract Crawler";
+    $("minigame-prompt-text").innerHTML =
+      "A corporate deal just closed! Time to collect the clauses.<br>" +
+      "Guide the contract snake to gather deal terms. Collect enough for a <strong style='color:#6fff9a'>+20% productivity boost</strong> for 6 hours.";
+    controls.textContent = "Arrow keys to change direction";
+  }
+
+  // Draw a preview frame on the minigame canvas
+  const c = mgCtx();
+  const W = mgCanvas().width, H = mgCanvas().height;
+  c.fillStyle = "#0b0c10";
+  c.fillRect(0, 0, W, H);
+  c.fillStyle = "#252a36";
+  c.font = "28px monospace";
+  c.textAlign = "center";
+  c.fillText(kind === "lit" ? "PAPER BLITZ" : "CONTRACT CRAWLER", W / 2, H / 2 - 10);
+  c.font = "14px monospace";
+  c.fillStyle = "#555";
+  c.fillText("Press Play to start", W / 2, H / 2 + 20);
+  c.textAlign = "start";
+
+  $("btn-minigame-play").onclick = () => {
+    prompt.style.display = "none";
+    if (kind === "lit") startPaperBlitz();
+    else startContractCrawler();
+  };
+
+  $("btn-minigame-skip").onclick = () => {
+    overlay.style.display = "none";
+    log("Skipped the minigame. Back to billing.");
+  };
+}
+
+function endMinigame(won, kind) {
+  minigameActive = false;
+  if (minigameLoop) { clearInterval(minigameLoop); minigameLoop = null; }
+  if (minigameKeyHandler) {
+    document.removeEventListener("keydown", minigameKeyHandler);
+    document.removeEventListener("keyup", minigameKeyHandler);
+    minigameKeyHandler = null;
+  }
+
+  state.minigameBoost.gamesPlayed += 1;
+
+  const result = $("minigame-result");
+  const resultText = $("minigame-result-text");
+  result.style.display = "";
+
+  if (won) {
+    state.minigameBoost.gamesWon += 1;
+    const boostDuration = 1000 * 60 * 60 * 6; // 6 hours
+    if (kind === "lit") {
+      state.minigameBoost.litBoostUntil = now() + boostDuration;
+    } else {
+      state.minigameBoost.corpBoostUntil = now() + boostDuration;
+    }
+    const label = kind === "lit" ? "Litigation" : "Corporate";
+    resultText.innerHTML = `<span style="color:#6fff9a;font-weight:700">You won!</span><br>${label} productivity boosted +20% for 6 hours.`;
+    log(`Minigame won! ${label} productivity boosted for 6 hours.`);
+  } else {
+    resultText.innerHTML = `<span style="color:#ff6f6f;font-weight:700">Time's up!</span><br>No boost this time. Better luck next round.`;
+    log("Minigame lost. No boost earned.");
+  }
+
+  checkAchievements();
+
+  $("btn-minigame-close").onclick = () => {
+    $("minigame-overlay").style.display = "none";
+  };
+}
+
+// ---- Paper Blitz (Galaga-like) ----
+
+function startPaperBlitz() {
+  minigameActive = true;
+  const c = mgCtx();
+  const W = mgCanvas().width, H = mgCanvas().height;
+
+  const GAME_DURATION = 25000; // 25 seconds
+  const TARGET_HITS = 12;
+  const startTime = Date.now();
+
+  // Player (lawyer at bottom)
+  const player = { x: W / 2 - 16, y: H - 40, w: 32, h: 28, speed: 5 };
+  const keys = { left: false, right: false, space: false };
+  let spaceReleased = true;
+
+  // Projectiles (papers fired upward)
+  const papers = [];
+  const PAPER_SPEED = 6;
+  let lastShotAt = 0;
+  const SHOT_COOLDOWN = 200;
+
+  // Jurors descending
+  const jurors = [];
+  let jurorSpawnTimer = 0;
+  const JUROR_SPEED_BASE = 1.0;
+  let hits = 0;
+  let missed = 0;
+
+  const JUROR_LABELS = [
+    "J1", "J2", "J3", "J4", "J5", "J6",
+    "J7", "J8", "J9", "J10", "J11", "J12",
+    "ALT"
+  ];
+  let labelIdx = 0;
+
+  function spawnJurorWave() {
+    const count = randInt(3, 6);
+    const row_y = -20;
+    const spacing = W / (count + 1);
+    for (let i = 0; i < count; i++) {
+      jurors.push({
+        x: spacing * (i + 1) - 12,
+        y: row_y - randInt(0, 20),
+        w: 24, h: 24,
+        speed: JUROR_SPEED_BASE + Math.random() * 0.6,
+        label: JUROR_LABELS[labelIdx % JUROR_LABELS.length],
+        alive: true,
+        sway: Math.random() * Math.PI * 2, // phase offset for horizontal sway
+        swayAmp: 0.3 + Math.random() * 0.5
+      });
+      labelIdx++;
+    }
+  }
+
+  function update() {
+    const elapsed = Date.now() - startTime;
+    if (elapsed >= GAME_DURATION) {
+      endMinigame(hits >= TARGET_HITS, "lit");
+      return;
+    }
+
+    // Move player
+    if (keys.left) player.x = Math.max(0, player.x - player.speed);
+    if (keys.right) player.x = Math.min(W - player.w, player.x + player.speed);
+
+    // Fire
+    if (keys.space && spaceReleased && Date.now() - lastShotAt > SHOT_COOLDOWN) {
+      papers.push({ x: player.x + player.w / 2 - 3, y: player.y - 6, w: 6, h: 10 });
+      lastShotAt = Date.now();
+      spaceReleased = false;
+    }
+    if (!keys.space) spaceReleased = true;
+
+    // Move papers
+    for (let i = papers.length - 1; i >= 0; i--) {
+      papers[i].y -= PAPER_SPEED;
+      if (papers[i].y < -10) papers.splice(i, 1);
+    }
+
+    // Spawn jurors in waves
+    jurorSpawnTimer += 33;
+    if (jurorSpawnTimer > 2200) {
+      spawnJurorWave();
+      jurorSpawnTimer = 0;
+    }
+
+    // Move jurors
+    for (let i = jurors.length - 1; i >= 0; i--) {
+      const j = jurors[i];
+      if (!j.alive) { jurors.splice(i, 1); continue; }
+      j.y += j.speed;
+      j.sway += 0.04;
+      j.x += Math.sin(j.sway) * j.swayAmp;
+      if (j.y > H + 10) {
+        missed++;
+        jurors.splice(i, 1);
+      }
+    }
+
+    // Collision: papers vs jurors
+    for (let pi = papers.length - 1; pi >= 0; pi--) {
+      const p = papers[pi];
+      for (let ji = jurors.length - 1; ji >= 0; ji--) {
+        const j = jurors[ji];
+        if (!j.alive) continue;
+        if (p.x < j.x + j.w && p.x + p.w > j.x && p.y < j.y + j.h && p.y + p.h > j.y) {
+          j.alive = false;
+          papers.splice(pi, 1);
+          hits++;
+          break;
+        }
+      }
+    }
+
+    // Draw
+    c.fillStyle = "#0b0c10";
+    c.fillRect(0, 0, W, H);
+
+    // Timer bar at top
+    const timeLeft = Math.max(0, GAME_DURATION - elapsed);
+    const timePct = timeLeft / GAME_DURATION;
+    c.fillStyle = "#1c2230";
+    c.fillRect(0, 0, W, 6);
+    c.fillStyle = timePct > 0.25 ? "#6fb3ff" : "#ff6f6f";
+    c.fillRect(0, 0, W * timePct, 6);
+
+    // Draw jurors
+    for (const j of jurors) {
+      if (!j.alive) continue;
+      // Juror body
+      c.fillStyle = "#2a3554";
+      c.fillRect(j.x, j.y, j.w, j.h);
+      // Juror head
+      c.fillStyle = "#b9926a";
+      c.fillRect(j.x + 6, j.y - 8, 12, 10);
+      // Label
+      c.fillStyle = "#ff6f6f";
+      c.font = "9px monospace";
+      c.textAlign = "center";
+      c.fillText(j.label, j.x + j.w / 2, j.y + j.h - 4);
+    }
+
+    // Draw papers (projectiles)
+    for (const p of papers) {
+      c.fillStyle = "#d9dbe6";
+      c.fillRect(p.x, p.y, p.w, p.h);
+      c.fillStyle = "#6fb3ff";
+      c.fillRect(p.x + 1, p.y + 2, p.w - 2, 1);
+      c.fillRect(p.x + 1, p.y + 5, p.w - 2, 1);
+    }
+
+    // Draw player (lawyer)
+    c.fillStyle = "#1f2740";
+    c.fillRect(player.x, player.y, player.w, player.h);
+    // Suit jacket
+    c.fillStyle = "#2a3554";
+    c.fillRect(player.x + 4, player.y + 4, 24, 20);
+    // Head
+    c.fillStyle = "#b9926a";
+    c.fillRect(player.x + 8, player.y - 14, 16, 14);
+    // Hair
+    c.fillStyle = "#5b3a29";
+    c.fillRect(player.x + 8, player.y - 14, 16, 4);
+    // Tie
+    c.fillStyle = "#ff6fb3";
+    c.fillRect(player.x + 14, player.y + 4, 4, 12);
+
+    c.textAlign = "start";
+
+    // HUD
+    $("minigame-score").textContent = `Hits: ${hits}/${TARGET_HITS} | ${Math.ceil(timeLeft / 1000)}s`;
+  }
+
+  // Initial wave
+  spawnJurorWave();
+
+  minigameKeyHandler = (e) => {
+    if (e.key === "ArrowLeft" || e.key === "a") keys.left = (e.type === "keydown");
+    if (e.key === "ArrowRight" || e.key === "d") keys.right = (e.type === "keydown");
+    if (e.key === " ") { keys.space = (e.type === "keydown"); e.preventDefault(); }
+  };
+  document.addEventListener("keydown", minigameKeyHandler);
+  document.addEventListener("keyup", minigameKeyHandler);
+
+  $("minigame-controls").textContent = "Arrow keys / A,D to move | Space to fire";
+  minigameLoop = setInterval(update, 33); // ~30fps
+}
+
+// ---- Contract Crawler (Snake-like) ----
+
+function startContractCrawler() {
+  minigameActive = true;
+  const c = mgCtx();
+  const CW = mgCanvas().width, CH = mgCanvas().height;
+
+  const CELL = 14;
+  const COLS = Math.floor(CW / CELL);
+  const ROWS = Math.floor(CH / CELL);
+  const TARGET_CLAUSES = 10;
+  const GAME_DURATION = 30000; // 30 seconds
+
+  const startTime = Date.now();
+  let collected = 0;
+  let gameOver = false;
+
+  // Snake starts in the middle, heading right
+  let snake = [
+    { x: Math.floor(COLS / 2), y: Math.floor(ROWS / 2) },
+    { x: Math.floor(COLS / 2) - 1, y: Math.floor(ROWS / 2) },
+    { x: Math.floor(COLS / 2) - 2, y: Math.floor(ROWS / 2) }
+  ];
+  let dir = { x: 1, y: 0 };
+  let nextDir = { x: 1, y: 0 };
+
+  const CLAUSE_LABELS = [
+    "NDA", "IP", "LIQ", "REP", "WAR",
+    "IND", "GOV", "ARB", "COV", "TER",
+    "AML", "ESC", "MAE", "FEE", "SPA"
+  ];
+  let clauseIdx = 0;
+
+  // Food (deal clause)
+  function spawnClause() {
+    let x, y, attempts = 0;
+    do {
+      x = randInt(1, COLS - 2);
+      y = randInt(1, ROWS - 2);
+      attempts++;
+    } while (snake.some(s => s.x === x && s.y === y) && attempts < 100);
+    return { x, y, label: CLAUSE_LABELS[clauseIdx++ % CLAUSE_LABELS.length] };
+  }
+
+  let clause = spawnClause();
+
+  function update() {
+    if (gameOver) return;
+
+    const elapsed = Date.now() - startTime;
+    if (elapsed >= GAME_DURATION) {
+      gameOver = true;
+      endMinigame(collected >= TARGET_CLAUSES, "corp");
+      return;
+    }
+
+    // Apply buffered direction change
+    dir = { ...nextDir };
+
+    // Move snake
+    const head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
+
+    // Wall collision (wrap around)
+    if (head.x < 0) head.x = COLS - 1;
+    if (head.x >= COLS) head.x = 0;
+    if (head.y < 0) head.y = ROWS - 1;
+    if (head.y >= ROWS) head.y = 0;
+
+    // Self collision
+    if (snake.some(s => s.x === head.x && s.y === head.y)) {
+      gameOver = true;
+      endMinigame(collected >= TARGET_CLAUSES, "corp");
+      return;
+    }
+
+    snake.unshift(head);
+
+    // Eat clause
+    if (head.x === clause.x && head.y === clause.y) {
+      collected++;
+      if (collected >= TARGET_CLAUSES) {
+        gameOver = true;
+        endMinigame(true, "corp");
+        return;
+      }
+      clause = spawnClause();
+      // Don't remove tail (snake grows)
+    } else {
+      snake.pop();
+    }
+
+    // Draw
+    c.fillStyle = "#0b0c10";
+    c.fillRect(0, 0, CW, CH);
+
+    // Timer bar
+    const timeLeft = Math.max(0, GAME_DURATION - elapsed);
+    const timePct = timeLeft / GAME_DURATION;
+    c.fillStyle = "#1c2230";
+    c.fillRect(0, 0, CW, 4);
+    c.fillStyle = timePct > 0.25 ? "#6fb3ff" : "#ff6f6f";
+    c.fillRect(0, 0, CW * timePct, 4);
+
+    // Draw grid lines (subtle)
+    c.strokeStyle = "#151820";
+    c.lineWidth = 0.5;
+    for (let x = 0; x <= COLS; x++) {
+      c.beginPath(); c.moveTo(x * CELL, 0); c.lineTo(x * CELL, CH); c.stroke();
+    }
+    for (let y = 0; y <= ROWS; y++) {
+      c.beginPath(); c.moveTo(0, y * CELL); c.lineTo(CW, y * CELL); c.stroke();
+    }
+
+    // Draw snake
+    for (let i = 0; i < snake.length; i++) {
+      const seg = snake[i];
+      const isHead = i === 0;
+      c.fillStyle = isHead ? "#6fff9a" : (i % 2 === 0 ? "#2b7a44" : "#1a5a30");
+      c.fillRect(seg.x * CELL + 1, seg.y * CELL + 1, CELL - 2, CELL - 2);
+      if (isHead) {
+        // Eyes on the head
+        c.fillStyle = "#0b0c10";
+        const ex = seg.x * CELL + (dir.x === 1 ? CELL - 5 : dir.x === -1 ? 3 : 4);
+        const ey = seg.y * CELL + (dir.y === 1 ? CELL - 5 : dir.y === -1 ? 3 : 4);
+        c.fillRect(ex, ey, 2, 2);
+        c.fillRect(ex + (dir.y !== 0 ? 5 : 0), ey + (dir.x !== 0 ? 5 : 0), 2, 2);
+      }
+    }
+
+    // Draw clause (food)
+    c.fillStyle = "#f2d98a";
+    c.fillRect(clause.x * CELL, clause.y * CELL, CELL, CELL);
+    c.fillStyle = "#0b0c10";
+    c.font = "7px monospace";
+    c.textAlign = "center";
+    c.fillText(clause.label, clause.x * CELL + CELL / 2, clause.y * CELL + CELL - 3);
+    c.textAlign = "start";
+
+    // HUD
+    $("minigame-score").textContent = `Clauses: ${collected}/${TARGET_CLAUSES} | ${Math.ceil(timeLeft / 1000)}s`;
+  }
+
+  minigameKeyHandler = (e) => {
+    // Buffer direction changes to prevent 180 turns
+    if ((e.key === "ArrowUp" || e.key === "w") && dir.y === 0) { nextDir = { x: 0, y: -1 }; e.preventDefault(); }
+    if ((e.key === "ArrowDown" || e.key === "s") && dir.y === 0) { nextDir = { x: 0, y: 1 }; e.preventDefault(); }
+    if ((e.key === "ArrowLeft" || e.key === "a") && dir.x === 0) { nextDir = { x: -1, y: 0 }; e.preventDefault(); }
+    if ((e.key === "ArrowRight" || e.key === "d") && dir.x === 0) { nextDir = { x: 1, y: 0 }; e.preventDefault(); }
+  };
+  document.addEventListener("keydown", minigameKeyHandler);
+
+  $("minigame-controls").textContent = "Arrow keys / WASD to steer";
+  minigameLoop = setInterval(update, 140); // Snake speed: ~7 moves/sec
+}
+
 // ---------- Boot ----------
 function saveSilent() {
   try {
@@ -2315,6 +2790,7 @@ function init() {
   if (!state.perks) state.perks = { nightOwl: false, masterBiller: false, goldenVoice: false };
   if (!state.perkProgress) state.perkProgress = { nightOwlTasks: 0, litTasksCompleted: 0 };
   if (!state.achievements) state.achievements = [];
+  if (!state.minigameBoost) state.minigameBoost = { litBoostUntil: 0, corpBoostUntil: 0, gamesPlayed: 0, gamesWon: 0 };
 
   initSettingsUI();
 
@@ -2331,6 +2807,8 @@ function init() {
   renderAll();
 
   setInterval(() => {
+    if (minigameActive) return; // Pause main sim during minigames
+
     const t = now();
     const dt = t - state.lastTick;
     state.lastTick = t;
@@ -2339,6 +2817,12 @@ function init() {
     tick(capped);
 
     renderAll();
+
+    // Show minigame prompt if one is pending
+    if (pendingMinigame && !minigameActive) {
+      showMinigamePrompt(pendingMinigame);
+      pendingMinigame = null;
+    }
   }, 1000);
 
   setInterval(() => {

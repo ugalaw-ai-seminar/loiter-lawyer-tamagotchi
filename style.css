@@ -166,5 +166,25 @@ button:disabled { opacity:0.45; cursor:not-allowed; }
 .api-status.error { color:#ff6f6f; }
 .api-status.disconnected { color: var(--muted); }
 
+/* --- Minigame overlay --- */
+.minigame-overlay { position:fixed; inset:0; z-index:100; background:rgba(0,0,0,0.85); display:flex; align-items:center; justify-content:center; }
+.minigame-container { background:var(--panel); border:2px solid var(--accent); border-radius:14px; padding:16px; max-width:460px; width:100%; }
+.minigame-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+.minigame-title { font-weight:700; font-size:15px; color:var(--accent); }
+.minigame-score { font-size:13px; color:#f2d98a; font-weight:600; font-variant-numeric:tabular-nums; }
+#minigame-canvas { width:100%; border:1px solid #252a36; border-radius:8px; background:#0b0c10; image-rendering:pixelated; display:block; }
+.minigame-prompt { text-align:center; padding:14px 0 6px; }
+.minigame-prompt > div:first-child { color:var(--muted); font-size:13px; margin-bottom:10px; line-height:1.4; }
+.minigame-prompt-actions { display:flex; gap:10px; justify-content:center; }
+.minigame-prompt-actions button { padding:8px 24px; font-size:13px; font-weight:600; border-radius:8px; }
+#btn-minigame-play { background:#1a3a2a; border-color:#2b5a3a; color:#6fff9a; }
+#btn-minigame-play:hover { border-color:#6fff9a; }
+#btn-minigame-skip { background:#1c2230; border-color:#3b4560; color:var(--muted); }
+.minigame-result { text-align:center; padding:14px 0 6px; }
+.minigame-result > div:first-child { color:var(--text); font-size:14px; margin-bottom:10px; line-height:1.5; }
+#btn-minigame-close { padding:8px 24px; font-size:13px; font-weight:600; border-radius:8px; background:#1a3a2a; border-color:#2b5a3a; color:#6fff9a; }
+#btn-minigame-close:hover { border-color:#6fff9a; }
+.minigame-controls { text-align:center; color:#555; font-size:11px; margin-top:6px; }
+
 footer { display:flex; gap:10px; align-items:center; padding:10px 12px; border-top:1px solid #252a36; color: var(--muted); font-size:12px; }
 .hint { margin-left:auto; }

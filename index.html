@@ -206,6 +206,29 @@
       </section>
     </main>
 
+    <!-- Minigame overlay -->
+    <div id="minigame-overlay" class="minigame-overlay" style="display:none">
+      <div class="minigame-container">
+        <div class="minigame-header">
+          <span id="minigame-title" class="minigame-title"></span>
+          <span id="minigame-score" class="minigame-score"></span>
+        </div>
+        <canvas id="minigame-canvas" width="420" height="340"></canvas>
+        <div id="minigame-prompt" class="minigame-prompt" style="display:none">
+          <div id="minigame-prompt-text"></div>
+          <div class="minigame-prompt-actions">
+            <button id="btn-minigame-play">Play</button>
+            <button id="btn-minigame-skip">Skip</button>
+          </div>
+        </div>
+        <div id="minigame-result" class="minigame-result" style="display:none">
+          <div id="minigame-result-text"></div>
+          <button id="btn-minigame-close">Back to Work</button>
+        </div>
+        <div id="minigame-controls" class="minigame-controls"></div>
+      </div>
+    </div>
+
     <footer>
       <button id="btn-new">New Game</button>
       <button id="btn-save">Save</button>
