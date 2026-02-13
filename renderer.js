@@ -231,7 +231,10 @@ const defaultState = () => ({
     playerScore: 0,        // Player's tug-of-war score
     momentum: 0,           // -100 to 100 (negative = rival winning, positive = player winning)
     lastTrashTalkAt: 0,
-    active: false
+    active: false,
+    pitchOffTriggered: false,  // Whether the resolution event has been offered
+    resolved: false,           // Whether the rivalry has ended (player won pitch-off)
+    resolvedAt: 0              // Timestamp when rivalry was resolved
   },
 
   // Partner: Breakaway / prestige
@@ -1421,6 +1424,10 @@ function tickRival(dtHours) {
     state.rival.active = false;
     return;
   }
+
+  // If resolved, rival is gone — skip all rival logic
+  if (state.rival.resolved) return;
+
   if (!state.rival.active) initRival();
 
   // Rival accumulates score at a variable rate (semi-random, competitive)
@@ -1455,6 +1462,263 @@ function tickRival(dtHours) {
   } else if (state.rival.momentum > 30) {
     state.stats.stress = clamp(state.stats.stress - 0.05 * dtHours, 0, 100);
   }
+
+  // Trigger pitch-off resolution: when total score is high enough (rivalry has matured)
+  // and it hasn't been triggered yet
+  const minScoreThreshold = 5000; // Both sides have been competing for a while
+  if (!state.rival.pitchOffTriggered && total > minScoreThreshold) {
+    // ~2% chance per tick once threshold is met (checks every second → triggers within a few hours)
+    if (Math.random() < 0.02) {
+      triggerPitchOff();
+    }
+  }
+}
+
+// --- Rival Resolution: Client Pitch-Off (CYOA) ---
+
+// The pitch-off is a 4-stage choose-your-own-adventure event.
+// Each choice affects an internal "edge" score. At the end,
+// edge > 0 = player wins, edge <= 0 = rival wins.
+// Momentum gives starting advantage/disadvantage.
+
+function triggerPitchOff() {
+  if (!state.rival.active || state.rival.pitchOffTriggered) return;
+  state.rival.pitchOffTriggered = true;
+
+  const rivalName = state.rival.name;
+  const rivalFirst = rivalName.split(" ")[0];
+
+  // Starting edge from momentum: player advantage if momentum > 0
+  let edge = Math.round(state.rival.momentum / 25); // -4 to +4
+
+  // Stage tracking
+  let stage = 0;
+
+  const stages = [
+    // STAGE 1: The Setup — how do you prepare?
+    {
+      intro: `The managing partner announces: a major client, Meridian Capital, is considering the firm for a hostile takeover defense. Both you and ${rivalName} have been asked to pitch.\n\nThis is it. Winner gets the client — and the inside track to Counsel.`,
+      question: "How do you prepare for the pitch?",
+      options: [
+        {
+          label: "Deep research — pull all-nighters studying Meridian's filings",
+          effect: () => {
+            edge += 2;
+            state.stats.sleep = clamp(state.stats.sleep - 12, 0, 100);
+            state.stats.stress = clamp(state.stats.stress + 6, 0, 100);
+            return `You spent 72 hours buried in SEC filings and proxy statements. You know Meridian's cap table better than their own CFO. Sleep is gone, but you're armed.`;
+          }
+        },
+        {
+          label: "Network — call in favors from contacts at Meridian",
+          effect: () => {
+            const bonus = state.store.leatherBriefcase ? 2 : 1;
+            edge += bonus;
+            state.stats.stress = clamp(state.stats.stress + 3, 0, 100);
+            return `You worked the phones. A college friend at Meridian's advisory firm tipped you off about their real concerns — the board is split.${bonus > 1 ? " (The briefcase opened doors.)" : ""}`;
+          }
+        },
+        {
+          label: "Wing it — you know this area cold",
+          effect: () => {
+            if (state.reputation.corp > 150 || state.reputation.lit > 150) {
+              edge += 1;
+              return "Your reputation precedes you. Sometimes confidence is preparation enough. The partners notice your composure.";
+            } else {
+              edge -= 1;
+              return `You walk in cool, but ${rivalFirst} clearly did the homework. The partners exchange a glance. Not ideal.`;
+            }
+          }
+        }
+      ]
+    },
+
+    // STAGE 2: The Opening — how do you start the pitch?
+    {
+      intro: `You and ${rivalName} are in the main conference room. Meridian's General Counsel, two board members, and three firm partners are seated. ${rivalFirst} goes first — a slick deck about market positioning. Competent, but generic.\n\nYour turn.`,
+      question: "How do you open your pitch?",
+      options: [
+        {
+          label: "Lead with the board split — show you've done insider-level research",
+          effect: () => {
+            edge += 2;
+            state.stats.stress = clamp(state.stats.stress + 4, 0, 100);
+            return `You opened by naming the two dissenting board members and outlining their objections. The GC leaned forward. ${rivalFirst}'s jaw tightened. You have their attention.`;
+          }
+        },
+        {
+          label: "Tell a story — open with a past deal you saved from collapse",
+          effect: () => {
+            const bonus = state.perks.goldenVoice ? 2 : 1;
+            edge += bonus;
+            return `You told the story of a hostile defense that everyone thought was lost — and how you found the poison pill that saved it. The room was quiet. ${bonus > 1 ? "Your golden voice carried every word." : "It landed."}`;
+          }
+        },
+        {
+          label: "Go aggressive — directly challenge the rival's approach",
+          effect: () => {
+            if (Math.random() < 0.5) {
+              edge += 2;
+              return `You pointed out three gaps in ${rivalFirst}'s analysis. Publicly. In front of the client. Ruthless — but the partners looked impressed. ${rivalFirst} is rattled.`;
+            } else {
+              edge -= 1;
+              state.stats.stress = clamp(state.stats.stress + 6, 0, 100);
+              return `You went after ${rivalFirst}'s pitch, but it came off as petty. The GC frowned. One of the partners shook their head slightly. Overplayed.`;
+            }
+          }
+        }
+      ]
+    },
+
+    // STAGE 3: The Curveball — the client throws a hard question
+    {
+      intro: `Meridian's GC interrupts: "Let's cut to it. We've had three firms pitch this week. What happens if the acquirer launches a tender offer at $47 — above our current trading price? Our shareholders will be tempted. Walk me through your defense, step by step."`,
+      question: "How do you respond?",
+      options: [
+        {
+          label: "Lay out a detailed three-phase defense strategy",
+          effect: () => {
+            edge += 2;
+            state.stats.stress = clamp(state.stats.stress + 2, 0, 100);
+            return "You walked through it: Phase 1, shareholder rights plan. Phase 2, white knight solicitation. Phase 3, litigation to challenge the tender. Timeline, cost estimates, everything. The GC nodded slowly. That's what they needed to hear.";
+          }
+        },
+        {
+          label: "Redirect — focus on why the $47 offer undervalues the company",
+          effect: () => {
+            edge += 1;
+            return `Smart reframe. You pulled up their five-year revenue projections and argued the intrinsic value is north of $60. The board members perked up. ${rivalFirst} scrambled to add something — too late.`;
+          }
+        },
+        {
+          label: "Admit uncertainty — 'It depends, and here's why that's actually good'",
+          effect: () => {
+            if (Math.random() < 0.4) {
+              edge += 2;
+              return "Radical honesty. You laid out three scenarios with different outcomes and explained your framework for adapting in real-time. The GC said, 'Finally, someone who doesn't pretend they know everything.' Home run.";
+            } else {
+              edge -= 1;
+              return `The GC wanted confidence, not caveats. ${rivalFirst} jumped in with a crisp answer. You lost the room for a moment.`;
+            }
+          }
+        }
+      ]
+    },
+
+    // STAGE 4: The Close — how do you seal it?
+    {
+      intro: `The pitch is winding down. Both sides have made their case. The GC leans back and says, "We'll decide by end of week." As everyone stands to leave, you have one last moment.`,
+      question: "How do you close?",
+      options: [
+        {
+          label: "Confident handshake — 'We're ready to start Monday if you are'",
+          effect: () => {
+            edge += 1;
+            return "You looked the GC in the eye, firm handshake, and said it like you already won. Confident without arrogance. The GC smiled. 'I like that.'";
+          }
+        },
+        {
+          label: "Personal touch — mention something specific about their company culture",
+          effect: () => {
+            edge += 2;
+            return "You mentioned their employee retention program — something you noticed in their proxy filing. 'That's worth defending.' The GC paused. 'Nobody else mentioned that.' Sometimes the human angle wins.";
+          }
+        },
+        {
+          label: "Leave behind a one-page strategy brief — let the work speak",
+          effect: () => {
+            edge += 1;
+            state.stats.stress = clamp(state.stats.stress + 2, 0, 100);
+            return `You slid a single page across the table: "MERIDIAN DEFENSE — 90-DAY ROADMAP." Clean. Professional. ${rivalFirst} had nothing to leave behind. The GC picked it up immediately.`;
+          }
+        }
+      ]
+    }
+  ];
+
+  // Run the CYOA sequence
+  function runStage() {
+    if (stage >= stages.length) {
+      // Resolution
+      resolvePitchOff(edge);
+      return;
+    }
+
+    const s = stages[stage];
+    const introText = stage === 0 ? s.intro : s.intro;
+
+    // Build the confirm-dialog sequence for this stage
+    // We use a series of confirms since the game uses confirm() for events
+    const header = `--- CLIENT PITCH-OFF: Round ${stage + 1} of ${stages.length} ---\n\n${introText}\n\n${s.question}\n\n`;
+    let choiceText = "";
+    for (let i = 0; i < s.options.length; i++) {
+      choiceText += `${i + 1}. ${s.options[i].label}\n`;
+    }
+
+    // Use a prompt() to get the player's choice (1, 2, or 3)
+    const input = prompt(
+      header + choiceText + "\nEnter 1, 2, or 3:",
+      "1"
+    );
+
+    let choiceIdx = parseInt(input, 10) - 1;
+    if (isNaN(choiceIdx) || choiceIdx < 0 || choiceIdx >= s.options.length) {
+      choiceIdx = 0; // Default to first option if invalid
+    }
+
+    const result = s.options[choiceIdx].effect();
+    log(result);
+
+    stage++;
+
+    // Small delay before next stage for dramatic pacing
+    setTimeout(runStage, 800);
+  }
+
+  log(`--- CLIENT PITCH-OFF: ${lawyerName()} vs. ${rivalName} ---`);
+  log("Meridian Capital needs a hostile takeover defense team. The firm is running a bake-off.");
+
+  // Kick off after a brief pause
+  setTimeout(runStage, 600);
+}
+
+function resolvePitchOff(edge) {
+  const rivalName = state.rival.name;
+  const rivalFirst = rivalName.split(" ")[0];
+
+  if (edge > 0) {
+    // Player wins
+    state.rival.resolved = true;
+    state.rival.resolvedAt = now();
+    state.rival.active = false;
+
+    const moneyBonus = randInt(400, 800);
+    const repBonus = randInt(20, 40);
+    state.money += moneyBonus;
+    state.reputation.corp += repBonus;
+    state.reputation.lit += Math.round(repBonus * 0.5);
+    state.stats.stress = clamp(state.stats.stress - 15, 0, 100);
+
+    log(`Meridian Capital chose YOU. The conference room erupted (internally — lawyers don't show emotion).`);
+    log(`+$${moneyBonus} signing bonus. +${repBonus} corp rep. +${Math.round(repBonus * 0.5)} lit rep.`);
+    log(`${rivalName} cleaned out their office a week later. Word is they left to do… y'know… plaintiff-side work.`);
+    log(`The path to Counsel is wide open.`);
+  } else {
+    // Rival wins — reset the arc
+    state.rival.pitchOffTriggered = false;
+    state.rival.score = 0;
+    state.rival.playerScore = 0;
+    state.rival.momentum = 0;
+
+    state.stats.stress = clamp(state.stats.stress + 15, 0, 100);
+    state.reputation.corp = clamp(state.reputation.corp - 10, 0, 9999);
+
+    log(`Meridian Capital chose ${rivalName}. The conference room felt very small.`);
+    log(`-10 corp rep. Stress up. ${rivalFirst} sent you a "commiserations" email. You didn't read it.`);
+    log(`The rivalry resets. There will be other clients — other chances.`);
+  }
+
+  renderAll();
 }
 
 // --- Partner: Breakaway / Prestige ---
@@ -2522,6 +2786,20 @@ function renderJuniors() {
 
 function renderRival() {
   const panel = $("arc-rival");
+
+  // Show resolved state if player won the pitch-off
+  if (rankIndex() === 2 && state.rival.resolved) {
+    panel.style.display = "";
+    $("rival-name-label").textContent = state.rival.name;
+    $("rival-pscore").textContent = Math.floor(state.rival.playerScore);
+    $("rival-rscore").textContent = "—";
+    $("tug-fill").style.width = "100%";
+    const status = $("rival-status");
+    status.textContent = `${state.rival.name} left the firm. Plaintiff-side work, apparently. You won.`;
+    status.style.color = "#6fff9a";
+    return;
+  }
+
   if (rankIndex() !== 2 || !state.rival.active) {
     panel.style.display = "none";
     return;
@@ -3819,7 +4097,10 @@ function init() {
   // Migrate old saves that lack arc fields
   if (!state.juniors) state.juniors = [];
   if (!state.nextJuniorSpawnAt) state.nextJuniorSpawnAt = 0;
-  if (!state.rival) state.rival = { name: "", score: 0, playerScore: 0, momentum: 0, lastTrashTalkAt: 0, active: false };
+  if (!state.rival) state.rival = { name: "", score: 0, playerScore: 0, momentum: 0, lastTrashTalkAt: 0, active: false, pitchOffTriggered: false, resolved: false, resolvedAt: 0 };
+  if (state.rival.pitchOffTriggered === undefined) state.rival.pitchOffTriggered = false;
+  if (state.rival.resolved === undefined) state.rival.resolved = false;
+  if (state.rival.resolvedAt === undefined) state.rival.resolvedAt = 0;
   if (!state.breakaway) state.breakaway = { count: 0, multiplier: 1.0, lifetimeEarnings: 0 };
   if (state.workChoices === undefined) state.workChoices = 0;
   if (state.familyChoices === undefined) state.familyChoices = 0;
