@@ -111,6 +111,47 @@ const BUILTIN_ITEMS = [
     cost: 600,
     category: "upgrade",
     effect: { target: "store.monogrammedPen", value: true }
+  },
+  // --- Consumable items (repurchasable) ---
+  {
+    id: "energyDrink",
+    name: "Energy Drink",
+    description: "Monster Ultra. +25 caffeine, +10% productivity for 3 hours. Consumable.",
+    cost: 30,
+    category: "consumable",
+    effect: { type: "consumable", action: "energyDrink" }
+  },
+  {
+    id: "therapistSession",
+    name: "Therapist Session",
+    description: "Dr. Feldman, LPC. -20 stress. Eases work-family tension. Consumable.",
+    cost: 200,
+    category: "consumable",
+    effect: { type: "consumable", action: "therapistSession" }
+  },
+  {
+    id: "weekendGetaway",
+    name: "Weekend Getaway",
+    description: "Two nights at a B&B in Traverse City. +30 sleep, -25 stress. Consumable.",
+    cost: 350,
+    category: "consumable",
+    effect: { type: "consumable", action: "weekendGetaway" }
+  },
+  {
+    id: "flowersForSpouse",
+    name: "Flowers for Spouse",
+    description: "A dozen roses from Eastern Market. Reduces work-family tension. Consumable.",
+    cost: 75,
+    category: "consumable",
+    effect: { type: "consumable", action: "flowersForSpouse" }
+  },
+  {
+    id: "giftsForKids",
+    name: "Gifts for the Kids",
+    description: "Lego set and art supplies. Your kids remember you exist. -5 stress. Consumable.",
+    cost: 120,
+    category: "consumable",
+    effect: { type: "consumable", action: "giftsForKids" }
   }
 ];
 

@@ -270,10 +270,15 @@ const defaultState = () => ({
   // Holidays triggered this year (array of "holiday_YYYY" strings)
   holidaysTriggered: [],
 
+  // PIP recovery
+  pipStrikeTimestamps: [],   // When each PIP strike was issued (for auto-decay)
+  onTimeCompletions: 0,      // On-time completions since last PIP (for recovery)
+
   // Minigame boosts & stats
   minigameBoost: {
     litBoostUntil: 0,       // Timestamp: litigation productivity boost active until
     corpBoostUntil: 0,      // Timestamp: corporate/negotiation productivity boost active until
+    regBoostUntil: 0,       // Timestamp: regulatory productivity boost active until
     gamesPlayed: 0,         // Total minigames played
     gamesWon: 0             // Total minigames won
   }
@@ -578,6 +583,7 @@ function applyItemEffect(item) {
 }
 
 function isItemOwned(item) {
+  if (item.category === "consumable") return false; // Consumables are always purchasable
   const key = item.id;
   if (key === "hat") return !!state.lawyer.outfit.hat;
   if (key === "tie") return !!state.lawyer.outfit.tie;
@@ -604,10 +610,53 @@ function isItemOwned(item) {
   return false;
 }
 
+function applyConsumable(item) {
+  const action = item.effect && item.effect.action;
+  switch (action) {
+    case "energyDrink":
+      state.stats.caffeine = clamp(state.stats.caffeine + 25, 0, 100);
+      state._energyDrinkUntil = now() + 1000 * 60 * 60 * 3;
+      log("Cracked open a Monster Ultra. Caffeine surging. Productivity boosted for 3 hours.");
+      break;
+    case "therapistSession":
+      state.stats.stress = clamp(state.stats.stress - 20, 0, 100);
+      state.workChoices = Math.max(0, state.workChoices - 1);
+      log("Dr. Feldman listened. Really listened. Stress down, and something feels lighter.");
+      break;
+    case "weekendGetaway":
+      state.stats.sleep = clamp(state.stats.sleep + 30, 0, 100);
+      state.stats.stress = clamp(state.stats.stress - 25, 0, 100);
+      log("Traverse City. Lake views. No Wi-Fi. You feel human again.");
+      break;
+    case "flowersForSpouse":
+      if (state.divorced) {
+        state.stats.stress = clamp(state.stats.stress + 5, 0, 100);
+        log("You bought flowers for… nobody. The vase sits on an empty kitchen table.");
+      } else {
+        state.workChoices = Math.max(0, state.workChoices - 2);
+        state.stats.stress = clamp(state.stats.stress - 5, 0, 100);
+        log(`Roses from Eastern Market. Your ${pn("wife", "husband")} smiled for the first time in weeks.`);
+      }
+      break;
+    case "giftsForKids":
+      state.workChoices = Math.max(0, state.workChoices - 1);
+      state.stats.stress = clamp(state.stats.stress - 5, 0, 100);
+      if (state.divorced) {
+        log(`Dropped off gifts at the house. Your ${pn("daughter", "son")} ran to the door. That look on ${pn("her", "his")} face was worth everything.`);
+      } else {
+        log("Lego set and art supplies. Your kids built something they called 'Daddy's Office.' You laughed. Then you didn't.");
+      }
+      break;
+    default:
+      log(`Used ${item.name}.`);
+  }
+}
+
 function buy(itemId) {
   const item = storeCatalog.find(i => i.id === itemId);
   if (!item) return;
-  if (isItemOwned(item)) {
+  const isConsumable = item.category === "consumable";
+  if (!isConsumable && isItemOwned(item)) {
     log("Already owned.");
     return;
   }
@@ -616,8 +665,12 @@ function buy(itemId) {
     return;
   }
   state.money -= item.cost;
-  applyItemEffect(item);
-  log(`Purchased: ${item.name}.`);
+  if (isConsumable) {
+    applyConsumable(item);
+  } else {
+    applyItemEffect(item);
+    log(`Purchased: ${item.name}.`);
+  }
   storeApi.reportPurchase(item.id, item.cost);
   renderAll();
 }
@@ -638,12 +691,14 @@ function renderStore() {
 
   for (const item of storeCatalog) {
     const owned = isItemOwned(item);
+    const isConsumable = item.category === "consumable";
     const div = document.createElement("div");
-    div.className = "store-item" + (owned ? " owned" : "");
+    div.className = "store-item" + (owned ? " owned" : "") + (isConsumable ? " consumable" : "");
+    const btnLabel = owned ? "Owned" : isConsumable ? `Use ($${item.cost})` : `Buy ($${item.cost})`;
     div.innerHTML = `
-      <div class="name">${item.name}${owned ? ' <span class="tag tag-done">Owned</span>' : ""}</div>
+      <div class="name">${item.name}${owned ? ' <span class="tag tag-done">Owned</span>' : ""}${isConsumable ? ' <span class="tag" style="background:#1a2a3a;color:#6fb3ff;border:1px solid #2b4a6a">Consumable</span>' : ""}</div>
       <div class="desc">${item.description || ""}</div>
-      <button data-buy="${item.id}" ${owned ? "disabled" : ""}>${owned ? "Owned" : `Buy ($${item.cost})`}</button>
+      <button data-buy="${item.id}" ${owned ? "disabled" : ""}>${btnLabel}</button>
     `;
     wrap.appendChild(div);
   }
@@ -859,8 +914,15 @@ function makeAssignment(opts = {}) {
   const kinds = ["lit", "corp", "reg"];
   const kind = opts.kind || randChoice(kinds);
 
-  let billableHours = randInt(2, 12);
-  let points = billableHours * randInt(18, 28);
+  const ri = rankIndex();
+
+  // Scale billable hours with rank: higher rank = bigger assignments
+  const baseMin = 2 + ri * 2;      // 2, 4, 6, 8, 10
+  const baseMax = 12 + ri * 3;     // 12, 15, 18, 21, 24
+  let billableHours = randInt(baseMin, baseMax);
+
+  // Scale pay with rank: higher rank = better compensation
+  let points = billableHours * randInt(18 + ri * 4, 28 + ri * 6);
   let stress = billableHours * 0.8;
 
   if (kind === "probono") {
@@ -869,13 +931,17 @@ function makeAssignment(opts = {}) {
     stress = -6;
   }
 
+  // Big ticket assignments (unchanged chance, scales with rank too)
   if (Math.random() < 0.18 && kind !== "probono") {
-    billableHours += randInt(6, 12);
-    points += randInt(200, 400);
+    billableHours += randInt(6, 12 + ri * 2);
+    points += randInt(200 + ri * 50, 400 + ri * 100);
     stress += randInt(6, 14);
   }
 
-  const deadlineHours = kind === "probono" ? randInt(36, 120) : randInt(24, 168);
+  // Scale deadlines with rank: higher rank = tighter deadlines, bigger payoff
+  const dlMin = Math.max(16, 24 - ri * 2);
+  const dlMax = Math.max(dlMin + 16, 168 - ri * 16);
+  const deadlineHours = kind === "probono" ? randInt(36, 120) : randInt(dlMin, dlMax);
   const deadlineAt = now() + deadlineHours * 60 * 60 * 1000;
 
   const names = {
@@ -918,6 +984,27 @@ function acceptOffer(id) {
   state.queue.push(a);
   state.stats.stress = clamp(state.stats.stress + 2, 0, 100);
   log(`Accepted: ${a.title} (${a.billableHours}h).`);
+}
+
+function declineOffer(id) {
+  const idx = state.offers.findIndex(o => o.id === id);
+  if (idx === -1) return;
+  const a = state.offers[idx];
+  state.offers.splice(idx, 1);
+
+  // Small rep cost for declining — the partner who assigned it noticed
+  const repCost = 2 + rankIndex(); // Higher rank = more visible decline
+  if (a.kind === "lit") state.reputation.lit = clamp(state.reputation.lit - repCost, 0, 9999);
+  else if (a.kind === "corp") state.reputation.corp = clamp(state.reputation.corp - repCost, 0, 9999);
+  else if (a.kind === "reg") state.reputation.reg = clamp(state.reputation.reg - repCost, 0, 9999);
+
+  const declineLines = [
+    `Declined: ${a.title}. (-${repCost} ${a.kind} rep) Someone else will handle it.`,
+    `Passed on ${a.title}. (-${repCost} ${a.kind} rep) The assigning partner raised an eyebrow.`,
+    `Declined: ${a.title}. (-${repCost} ${a.kind} rep) Sometimes you have to say no.`,
+    `Turned down ${a.title}. (-${repCost} ${a.kind} rep) Strategic or suicidal? Time will tell.`
+  ];
+  log(randChoice(declineLines));
 }
 
 function clearTask(id) {
@@ -988,6 +1075,9 @@ function checkFamilySpiral() {
   // PIP strike at 4 consecutive family choices
   if (state.familyChoices >= 4) {
     state.pipStrikes += 1;
+    if (!state.pipStrikeTimestamps) state.pipStrikeTimestamps = [];
+    state.pipStrikeTimestamps.push(now());
+    state.onTimeCompletions = 0;
     state.familyChoices = 0; // Reset so they can accumulate again
     log("HR called. Your 'work-life balance' has been noticed. PIP strike issued.");
     log(`The firm doesn't care about your ${pn("daughter", "son")}'s recital.`);
@@ -1805,7 +1895,11 @@ function productivityMultiplier() {
   if (state.minigameBoost) {
     if (state.minigameBoost.litBoostUntil > now()) mult *= 1.20;
     if (state.minigameBoost.corpBoostUntil > now()) mult *= 1.20;
+    if (state.minigameBoost.regBoostUntil > now()) mult *= 1.20;
   }
+
+  // Energy drink consumable boost
+  if (state._energyDrinkUntil && state._energyDrinkUntil > now()) mult *= 1.10;
 
   return mult;
 }
@@ -1873,6 +1967,9 @@ function tick(dtMs) {
       a._missed = true;
       state.missedDeadlines += 1;
       state.pipStrikes += 1;
+      if (!state.pipStrikeTimestamps) state.pipStrikeTimestamps = [];
+      state.pipStrikeTimestamps.push(now());
+      state.onTimeCompletions = 0; // Reset on-time streak
       state.stats.stress = clamp(state.stats.stress + 12, 0, 100);
       log(`Deadline MISSED: ${a.title}. PIP strike issued.`);
     }
@@ -1903,10 +2000,23 @@ function tick(dtMs) {
       // masterBiller tracks via state.billables (already incremented above)
       checkPerkUnlocks();
 
+      // PIP recovery: on-time completions work off strikes
+      if (!a._missed && a.kind !== "probono") {
+        state.onTimeCompletions = (state.onTimeCompletions || 0) + 1;
+        if (state.pipStrikes > 0 && state.onTimeCompletions >= 5) {
+          state.pipStrikes = Math.max(0, state.pipStrikes - 1);
+          state.onTimeCompletions = 0;
+          if (state.pipStrikeTimestamps && state.pipStrikeTimestamps.length > 0) {
+            state.pipStrikeTimestamps.shift(); // Remove oldest strike
+          }
+          log("Consistent performance noted. One PIP strike removed. Keep it up.");
+        }
+      }
+
       log(`Completed: ${a.title}. +$${earnedPoints}, +rep.`);
 
-      // ~30% chance to trigger a minigame on lit or corp completion
-      if ((a.kind === "lit" || a.kind === "corp") && Math.random() < 0.30 && !minigameActive) {
+      // ~30% chance to trigger a minigame on lit, corp, or reg completion
+      if ((a.kind === "lit" || a.kind === "corp" || a.kind === "reg") && Math.random() < 0.30 && !minigameActive) {
         pendingMinigame = a.kind;
       }
     }
@@ -1956,7 +2066,21 @@ function tick(dtMs) {
 
   if (critical && Math.random() < 0.002 * dtMs) {
     state.pipStrikes += 1;
+    if (!state.pipStrikeTimestamps) state.pipStrikeTimestamps = [];
+    state.pipStrikeTimestamps.push(now());
+    state.onTimeCompletions = 0;
     log("Critical condition persisted. HR is 'circling back' (PIP strike).");
+  }
+
+  // PIP auto-decay: strikes expire after 3 months (90 days)
+  if (state.pipStrikes > 0 && state.pipStrikeTimestamps && state.pipStrikeTimestamps.length > 0) {
+    const THREE_MONTHS_MS = 1000 * 60 * 60 * 24 * 90;
+    const expiredCount = state.pipStrikeTimestamps.filter(ts => now() - ts >= THREE_MONTHS_MS).length;
+    if (expiredCount > 0) {
+      state.pipStrikeTimestamps = state.pipStrikeTimestamps.filter(ts => now() - ts < THREE_MONTHS_MS);
+      state.pipStrikes = Math.max(0, state.pipStrikes - expiredCount);
+      log(`${expiredCount} PIP strike${expiredCount > 1 ? "s" : ""} expired. Time heals… some things.`);
+    }
   }
 
   checkAchievements();
@@ -1987,10 +2111,14 @@ function renderStats() {
 
   $("points").textContent = "$" + Math.floor(state.money).toString();
   $("billables").textContent = Math.floor(state.billables).toString();
-  $("pip").textContent = state.pipStrikes.toString();
+  const onTime = state.onTimeCompletions || 0;
+  const pipLabel = state.pipStrikes > 0 && onTime > 0
+    ? `${state.pipStrikes} (${onTime}/5 toward recovery)`
+    : state.pipStrikes.toString();
+  $("pip").textContent = pipLabel;
 
   const prod = productivityMultiplier();
-  const boostActive = state.minigameBoost && (state.minigameBoost.litBoostUntil > now() || state.minigameBoost.corpBoostUntil > now());
+  const boostActive = state.minigameBoost && (state.minigameBoost.litBoostUntil > now() || state.minigameBoost.corpBoostUntil > now() || state.minigameBoost.regBoostUntil > now());
   let prodLabel = state.breakaway.multiplier > 1
     ? `${Math.round(prod * 100)}% (${state.breakaway.multiplier.toFixed(2)}x prestige)`
     : `${Math.round(prod * 100)}%`;
@@ -2017,14 +2145,16 @@ function renderOffers() {
     const card = document.createElement("div");
     card.className = "card";
     const dl = new Date(o.deadlineAt).toLocaleString();
+    const repCost = 2 + rankIndex();
     card.innerHTML = `
       <div class="top">
         <div>
           <div class="name">${o.title}</div>
           <div class="meta">${o.kind.toUpperCase()} • Deadline: ${dl}</div>
         </div>
-        <div>
+        <div style="display:flex;gap:6px;">
           <button data-accept="${o.id}">Accept</button>
+          <button class="btn-decline" data-decline="${o.id}" title="Decline (-${repCost} ${o.kind} rep)">Decline</button>
         </div>
       </div>
       <div class="mini">
@@ -2037,6 +2167,12 @@ function renderOffers() {
 
   wrap.querySelectorAll("[data-accept]").forEach(btn => {
     btn.addEventListener("click", () => acceptOffer(btn.getAttribute("data-accept")));
+  });
+  wrap.querySelectorAll("[data-decline]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      declineOffer(btn.getAttribute("data-decline"));
+      renderOffers();
+    });
   });
 }
 
@@ -2577,12 +2713,18 @@ function showMinigamePrompt(kind) {
       "A litigation assignment is complete! Time to celebrate.<br>" +
       "Fire legal briefs at the descending jurors. Hit enough to earn a <strong style='color:#6fff9a'>+20% productivity boost</strong> for 6 hours.";
     controls.textContent = "Arrow keys to move, Space to fire";
-  } else {
+  } else if (kind === "corp") {
     $("minigame-title").textContent = "Contract Crawler";
     $("minigame-prompt-text").innerHTML =
       "A corporate deal just closed! Time to collect the clauses.<br>" +
       "Guide the contract snake to gather deal terms. Collect enough for a <strong style='color:#6fff9a'>+20% productivity boost</strong> for 6 hours.";
     controls.textContent = "Arrow keys to change direction";
+  } else {
+    $("minigame-title").textContent = "Redaction Rush";
+    $("minigame-prompt-text").innerHTML =
+      "A regulatory filing is done! Time to redact the sensitive info.<br>" +
+      "Move your cursor and redact classified terms — but leave public records alone. Redact enough for a <strong style='color:#6fff9a'>+20% productivity boost</strong> for 6 hours.";
+    controls.textContent = "Arrow keys to move, Space to redact";
   }
 
   // Draw a preview frame on the minigame canvas
@@ -2602,7 +2744,8 @@ function showMinigamePrompt(kind) {
   $("btn-minigame-play").onclick = () => {
     prompt.style.display = "none";
     if (kind === "lit") startPaperBlitz();
-    else startContractCrawler();
+    else if (kind === "corp") startContractCrawler();
+    else startRedactionRush();
   };
 
   $("btn-minigame-skip").onclick = () => {
@@ -2631,10 +2774,12 @@ function endMinigame(won, kind) {
     const boostDuration = 1000 * 60 * 60 * 6; // 6 hours
     if (kind === "lit") {
       state.minigameBoost.litBoostUntil = now() + boostDuration;
-    } else {
+    } else if (kind === "corp") {
       state.minigameBoost.corpBoostUntil = now() + boostDuration;
+    } else {
+      state.minigameBoost.regBoostUntil = now() + boostDuration;
     }
-    const label = kind === "lit" ? "Litigation" : "Corporate";
+    const label = kind === "lit" ? "Litigation" : kind === "corp" ? "Corporate" : "Regulatory";
     resultText.innerHTML = `<span style="color:#6fff9a;font-weight:700">You won!</span><br>${label} productivity boosted +20% for 6 hours.`;
     log(`Minigame won! ${label} productivity boosted for 6 hours.`);
   } else {
@@ -2991,6 +3136,217 @@ function startContractCrawler() {
 
   $("minigame-controls").textContent = "Arrow keys / WASD to steer";
   minigameLoop = setInterval(update, 140); // Snake speed: ~7 moves/sec
+}
+
+// ---- Redaction Rush (Grid-based redaction game) ----
+
+function startRedactionRush() {
+  minigameActive = true;
+  const c = mgCtx();
+  const CW = mgCanvas().width, CH = mgCanvas().height;
+
+  const GAME_DURATION = 25000; // 25 seconds
+  const TARGET_REDACTIONS = 12;
+  const startTime = Date.now();
+
+  const COLS = 5, ROWS = 4;
+  const CELL_W = Math.floor(CW / COLS);
+  const CELL_H = Math.floor((CH - 20) / ROWS); // Reserve top 20px for timer bar
+  const Y_OFFSET = 20;
+
+  const SENSITIVE_LABELS = [
+    "SSN", "$AMT", "CLIENT", "ADDR", "DOB",
+    "ACCT#", "SALARY", "INSIDER", "NDA-BRK", "PRIV",
+    "TAX ID", "WIRE#", "PII", "SEALED", "SECRET"
+  ];
+  const SAFE_LABELS = [
+    "WHEREAS", "HEREBY", "PURSUANT", "PARTY A", "SECTION",
+    "CLAUSE", "THEREOF", "AGREED", "DATED", "FILED",
+    "EXHIBIT", "RECITAL", "TERM", "NOTICE", "AMEND"
+  ];
+
+  let cursorX = 0, cursorY = 0;
+  let correctRedactions = 0;
+  let wrongRedactions = 0;
+  let gameOver = false;
+
+  // Build grid of words
+  let grid = [];
+  function fillGrid() {
+    grid = [];
+    for (let r = 0; r < ROWS; r++) {
+      const row = [];
+      for (let col = 0; col < COLS; col++) {
+        const isSensitive = Math.random() < 0.45; // ~45% sensitive
+        row.push({
+          label: isSensitive
+            ? SENSITIVE_LABELS[Math.floor(Math.random() * SENSITIVE_LABELS.length)]
+            : SAFE_LABELS[Math.floor(Math.random() * SAFE_LABELS.length)],
+          sensitive: isSensitive,
+          redacted: false,
+          flashUntil: 0 // flash feedback timer
+        });
+      }
+      row.push(); // noop, just for clarity
+      grid.push(row);
+    }
+  }
+
+  function replaceCell(r, col) {
+    const isSensitive = Math.random() < 0.45;
+    grid[r][col] = {
+      label: isSensitive
+        ? SENSITIVE_LABELS[Math.floor(Math.random() * SENSITIVE_LABELS.length)]
+        : SAFE_LABELS[Math.floor(Math.random() * SAFE_LABELS.length)],
+      sensitive: isSensitive,
+      redacted: false,
+      flashUntil: 0
+    };
+  }
+
+  fillGrid();
+
+  function redactCurrent() {
+    const cell = grid[cursorY][cursorX];
+    if (cell.redacted) return;
+    cell.redacted = true;
+    if (cell.sensitive) {
+      correctRedactions++;
+      cell.flashUntil = Date.now() + 300;
+      if (correctRedactions >= TARGET_REDACTIONS) {
+        gameOver = true;
+        endMinigame(true, "reg");
+        return;
+      }
+    } else {
+      wrongRedactions++;
+      correctRedactions = Math.max(0, correctRedactions - 1); // Penalty
+      cell.flashUntil = Date.now() + 300;
+    }
+    // Replace redacted cell after a short delay
+    setTimeout(() => {
+      if (!gameOver) replaceCell(cursorY, cursorX);
+    }, 400);
+  }
+
+  function update() {
+    if (gameOver) return;
+
+    const elapsed = Date.now() - startTime;
+    if (elapsed >= GAME_DURATION) {
+      gameOver = true;
+      endMinigame(correctRedactions >= TARGET_REDACTIONS, "reg");
+      return;
+    }
+
+    // Draw background
+    c.fillStyle = "#0b0c10";
+    c.fillRect(0, 0, CW, CH);
+
+    // Timer bar
+    const timeLeft = Math.max(0, GAME_DURATION - elapsed);
+    const timePct = timeLeft / GAME_DURATION;
+    c.fillStyle = "#1c2230";
+    c.fillRect(0, 0, CW, 6);
+    c.fillStyle = timePct > 0.25 ? "#6fb3ff" : "#ff6f6f";
+    c.fillRect(0, 0, CW * timePct, 6);
+
+    // Draw "document" header
+    c.fillStyle = "#252a36";
+    c.fillRect(0, 8, CW, 10);
+    c.fillStyle = "#555";
+    c.font = "8px monospace";
+    c.textAlign = "center";
+    c.fillText("CONFIDENTIAL — REGULATORY FILING — REDACT SENSITIVE TERMS", CW / 2, 16);
+
+    // Draw grid cells
+    for (let r = 0; r < ROWS; r++) {
+      for (let col = 0; col < COLS; col++) {
+        const cell = grid[r][col];
+        const x = col * CELL_W + 2;
+        const y = r * CELL_H + Y_OFFSET + 2;
+        const w = CELL_W - 4;
+        const h = CELL_H - 4;
+        const isSelected = (col === cursorX && r === cursorY);
+        const flashing = cell.flashUntil > Date.now();
+
+        // Cell background
+        if (cell.redacted) {
+          // Redacted — show feedback
+          if (flashing && cell.sensitive) {
+            c.fillStyle = "#1a3a2a"; // green flash (correct)
+          } else if (flashing && !cell.sensitive) {
+            c.fillStyle = "#3a1a1a"; // red flash (wrong)
+          } else {
+            c.fillStyle = "#0a0a0a"; // blacked out
+          }
+        } else if (cell.sensitive) {
+          c.fillStyle = isSelected ? "#3a1a1a" : "#1a1020"; // sensitive = reddish tint
+        } else {
+          c.fillStyle = isSelected ? "#1a2a3a" : "#10131a"; // safe = bluish tint
+        }
+        c.fillRect(x, y, w, h);
+
+        // Border
+        c.strokeStyle = isSelected ? "#f2d98a" : "#252a36";
+        c.lineWidth = isSelected ? 2 : 1;
+        c.strokeRect(x, y, w, h);
+
+        // Label
+        if (!cell.redacted) {
+          // Color code: sensitive = red-ish, safe = dim blue
+          c.fillStyle = cell.sensitive ? "#ff6f6f" : "#6fb3ff";
+          c.font = "bold 11px monospace";
+          c.textAlign = "center";
+          c.fillText(cell.label, x + w / 2, y + h / 2 + 4);
+        } else if (flashing) {
+          c.fillStyle = cell.sensitive ? "#6fff9a" : "#ff6f6f";
+          c.font = "bold 12px monospace";
+          c.textAlign = "center";
+          c.fillText(cell.sensitive ? "OK" : "X", x + w / 2, y + h / 2 + 4);
+        } else {
+          // Solid redaction bar
+          c.fillStyle = "#1a1a1a";
+          c.fillRect(x + 8, y + h / 2 - 3, w - 16, 6);
+        }
+
+        // Sensitivity marker (small dot)
+        if (!cell.redacted) {
+          c.fillStyle = cell.sensitive ? "#ff6f6f" : "#2a3554";
+          c.fillRect(x + 4, y + 4, 4, 4);
+        }
+      }
+    }
+
+    // Legend
+    c.font = "9px monospace";
+    c.textAlign = "start";
+    c.fillStyle = "#ff6f6f";
+    c.fillRect(4, CH - 14, 6, 6);
+    c.fillStyle = "#a9b0bb";
+    c.fillText("Sensitive (redact)", 14, CH - 8);
+    c.fillStyle = "#2a3554";
+    c.fillRect(140, CH - 14, 6, 6);
+    c.fillStyle = "#a9b0bb";
+    c.fillText("Public (skip)", 150, CH - 8);
+    c.textAlign = "start";
+
+    // HUD
+    $("minigame-score").textContent = `Redacted: ${correctRedactions}/${TARGET_REDACTIONS} | Errors: ${wrongRedactions} | ${Math.ceil(timeLeft / 1000)}s`;
+  }
+
+  minigameKeyHandler = (e) => {
+    if (e.type !== "keydown") return;
+    if (e.key === "ArrowLeft" || e.key === "a") { cursorX = Math.max(0, cursorX - 1); e.preventDefault(); }
+    if (e.key === "ArrowRight" || e.key === "d") { cursorX = Math.min(COLS - 1, cursorX + 1); e.preventDefault(); }
+    if (e.key === "ArrowUp" || e.key === "w") { cursorY = Math.max(0, cursorY - 1); e.preventDefault(); }
+    if (e.key === "ArrowDown" || e.key === "s") { cursorY = Math.min(ROWS - 1, cursorY + 1); e.preventDefault(); }
+    if (e.key === " ") { redactCurrent(); e.preventDefault(); }
+  };
+  document.addEventListener("keydown", minigameKeyHandler);
+
+  $("minigame-controls").textContent = "Arrow keys / WASD to move cursor | Space to redact";
+  minigameLoop = setInterval(update, 33); // ~30fps
 }
 
 // ---------- Secret Ending Cutscenes ----------
@@ -3478,7 +3834,10 @@ function init() {
   if (!state.perks) state.perks = { nightOwl: false, masterBiller: false, goldenVoice: false };
   if (!state.perkProgress) state.perkProgress = { nightOwlTasks: 0, litTasksCompleted: 0 };
   if (!state.achievements) state.achievements = [];
-  if (!state.minigameBoost) state.minigameBoost = { litBoostUntil: 0, corpBoostUntil: 0, gamesPlayed: 0, gamesWon: 0 };
+  if (!state.minigameBoost) state.minigameBoost = { litBoostUntil: 0, corpBoostUntil: 0, regBoostUntil: 0, gamesPlayed: 0, gamesWon: 0 };
+  if (state.minigameBoost.regBoostUntil === undefined) state.minigameBoost.regBoostUntil = 0;
+  if (!state.pipStrikeTimestamps) state.pipStrikeTimestamps = [];
+  if (state.onTimeCompletions === undefined) state.onTimeCompletions = 0;
   if (!state.holidaysTriggered) state.holidaysTriggered = [];
   if (state.lawyer.name === undefined) state.lawyer.name = "";
   // Store item migrations
