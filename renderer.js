@@ -1935,7 +1935,11 @@ function tick(dtMs) {
 
   if (state.pipStrikes >= 3) {
     state.dismissed = true;
-    if (rankIndex() >= 1) {
+    if (rankIndex() >= 1 && state.divorced) {
+      // Secret ending: fired post-divorce — empty house
+      log("Dismissed. The firm has decided you are not 'a good fit.'");
+      setTimeout(() => showDivorceEnding(), 600);
+    } else if (rankIndex() >= 1) {
       // Secret ending: fired beyond first year — go home to family
       log("Dismissed. The firm has decided you are not 'a good fit.'");
       setTimeout(() => showFamilyEnding(), 600);
@@ -2989,214 +2993,244 @@ function startContractCrawler() {
   minigameLoop = setInterval(update, 140); // Snake speed: ~7 moves/sec
 }
 
-// ---------- Secret Ending Cutscene ----------
+// ---------- Secret Ending Cutscenes ----------
 
-function showFamilyEnding() {
+// Shared cutscene utilities
+function openCutscene() {
   const overlay = $("cutscene-overlay");
   overlay.style.display = "flex";
+  return {
+    overlay,
+    cvs: $("cutscene-canvas"),
+    ctx: $("cutscene-canvas").getContext("2d"),
+    W: $("cutscene-canvas").width,
+    H: $("cutscene-canvas").height
+  };
+}
 
-  const cvs = $("cutscene-canvas");
-  const ctx = cvs.getContext("2d");
-  const W = cvs.width, H = cvs.height;
+function closeCutscene() {
+  $("cutscene-overlay").style.display = "none";
+  $("cutscene-text").classList.remove("visible");
+  $("btn-cutscene-close").classList.remove("visible");
+  $("btn-cutscene-close").style.display = "none";
+  $("cutscene-text").textContent = "";
+}
 
+function finishCutscene(drawFrame, text) {
+  drawFrame();
+  setTimeout(() => {
+    const textEl = $("cutscene-text");
+    textEl.textContent = text;
+    textEl.classList.add("visible");
+  }, 800);
+  setTimeout(() => {
+    const btn = $("btn-cutscene-close");
+    btn.style.display = "";
+    btn.classList.add("visible");
+  }, 3500);
+  $("btn-cutscene-close").onclick = closeCutscene;
+}
+
+// Shared drawing helpers (used by both endings)
+function drawCutsceneSprite(px, x, y, isFemaleSprite, s) {
+  s = s || 1;
+  const p = (rx, ry, rw, rh, c) => px(x + rx * s, y + ry * s, rw * s, rh * s, c);
+
+  if (isFemaleSprite) {
+    p(2, 0, 26, 28, "#1f2740");
+    p(6, 4, 6, 16, "#2a3554");
+    p(18, 4, 6, 16, "#2a3554");
+    p(12, 4, 6, 20, "#d9dbe6");
+    p(4, 26, 22, 6, "#1f2740");
+    p(-4, 6, 6, 16, "#1f2740");
+    p(28, 6, 6, 16, "#1f2740");
+    p(6, 32, 6, 10, "#b9926a");
+    p(18, 32, 6, 10, "#b9926a");
+    p(5, -16, 20, 16, "#b9926a");
+    p(3, -18, 24, 6, "#5b3a29");
+    p(1, -14, 4, 16, "#5b3a29");
+    p(25, -14, 4, 16, "#5b3a29");
+    p(2, -4, 2, 3, "#f2d98a");
+    p(26, -4, 2, 3, "#f2d98a");
+  } else {
+    p(0, 0, 30, 30, "#1f2740");
+    p(4, 4, 6, 18, "#2a3554");
+    p(20, 4, 6, 18, "#2a3554");
+    p(12, 4, 6, 22, "#d9dbe6");
+    p(14, 8, 2, 16, "#2a3040");
+    p(13, 8, 4, 3, "#2a3040");
+    p(-6, 6, 6, 18, "#1f2740");
+    p(30, 6, 6, 18, "#1f2740");
+    p(6, 30, 7, 12, "#1a1a2a");
+    p(17, 30, 7, 12, "#1a1a2a");
+    p(5, -16, 20, 16, "#b9926a");
+    p(5, -16, 20, 4, "#5b3a29");
+  }
+}
+
+function drawCutsceneSmile(px, x, y, f, s) {
+  s = s || 1;
+  const p = (rx, ry, rw, rh, c) => px(x + rx * s, y + ry * s, rw * s, rh * s, c);
+  p(9, -10, 3, 2, "#1a1a1a");
+  p(18, -10, 3, 2, "#1a1a1a");
+  p(11, -4, 8, 1, "#1a1a1a");
+  p(10, -5, 2, 1, "#1a1a1a");
+  p(19, -5, 2, 1, "#1a1a1a");
+}
+
+function drawCutsceneNeutral(px, x, y, f, s) {
+  s = s || 1;
+  const p = (rx, ry, rw, rh, c) => px(x + rx * s, y + ry * s, rw * s, rh * s, c);
+  p(9, -10, 3, 2, "#1a1a1a");
+  p(18, -10, 3, 2, "#1a1a1a");
+  p(11, -4, 6, 1, "#1a1a1a");
+}
+
+function drawCutsceneSadFace(px, x, y, f, s) {
+  s = s || 1;
+  const p = (rx, ry, rw, rh, c) => px(x + rx * s, y + ry * s, rw * s, rh * s, c);
+  p(9, -10, 3, 2, "#1a1a1a");
+  p(18, -10, 3, 2, "#1a1a1a");
+  // Frown (curved down)
+  p(11, -3, 8, 1, "#1a1a1a");
+  p(10, -3, 2, 1, "#1a1a1a");
+  p(19, -3, 2, 1, "#1a1a1a");
+  p(10, -4, 2, 1, "#1a1a1a");
+  p(19, -4, 2, 1, "#1a1a1a");
+}
+
+function drawCutsceneChild(px, x, y, childIdx) {
+  const s = 0.7;
+  const p = (rx, ry, rw, rh, c) => px(x + rx * s, y + ry * s, rw * s, rh * s, c);
+  p(2, 0, 18, 18, childIdx === 0 ? "#3a4a6a" : "#6a3a4a");
+  p(-3, 4, 5, 10, childIdx === 0 ? "#3a4a6a" : "#6a3a4a");
+  p(20, 4, 5, 10, childIdx === 0 ? "#3a4a6a" : "#6a3a4a");
+  p(4, 18, 5, 8, "#1a1a2a");
+  p(13, 18, 5, 8, "#1a1a2a");
+  p(3, -12, 16, 12, "#c9a27a");
+  p(3, -12, 16, 4, childIdx === 0 ? "#5b3a29" : "#8b5a39");
+  p(6, -7, 2, 2, "#1a1a1a");
+  p(13, -7, 2, 2, "#1a1a1a");
+  p(8, -3, 6, 1, "#1a1a1a");
+  p(7, -4, 2, 1, "#1a1a1a");
+  p(14, -4, 2, 1, "#1a1a1a");
+}
+
+// --- Warm sky (family ending) ---
+function drawWarmSky(px, W) {
+  px(0, 0, W, 140, "#1a1030");
+  px(0, 0, W, 50, "#0e0820");
+  px(0, 50, W, 40, "#241838");
+  px(0, 90, W, 50, "#3a2040");
+  px(0, 130, W, 10, "#6a3838");
+  px(0, 136, W, 4, "#c87050");
+  const starSeed = 42;
+  for (let i = 0; i < 30; i++) {
+    const sx = ((starSeed * (i + 1) * 7) % W);
+    const sy = ((starSeed * (i + 1) * 3) % 100);
+    px(sx, sy, 2, 2, i % 3 === 0 ? "#f2d98a" : "#cfe1ff");
+  }
+}
+
+// --- Cold sky (divorce ending) ---
+function drawColdSky(px, W) {
+  px(0, 0, W, 140, "#080a12");
+  px(0, 0, W, 50, "#040610");
+  px(0, 50, W, 40, "#0a0e1a");
+  px(0, 90, W, 50, "#10142a");
+  // No sunset glow — just a dull grey horizon
+  px(0, 130, W, 10, "#1a1a22");
+  px(0, 136, W, 4, "#252530");
+  // Fewer, dimmer stars
+  const starSeed = 42;
+  for (let i = 0; i < 15; i++) {
+    const sx = ((starSeed * (i + 1) * 7) % W);
+    const sy = ((starSeed * (i + 1) * 3) % 100);
+    px(sx, sy, 2, 2, "#555566");
+  }
+}
+
+// --- House drawing (shared, but with warm/dark window option) ---
+function drawCutsceneHouse(px, warm) {
+  // Grass
+  px(0, 220, 480, 80, warm ? "#1a3a1a" : "#101a10");
+  px(0, 220, 480, 4, warm ? "#2b5a2a" : "#1a2a1a");
+  // Sidewalk
+  px(0, 250, 480, 8, "#3a3a3a");
+  // House body
+  px(300, 140, 140, 80, warm ? "#2a2040" : "#1a1828");
+  // Roof
+  for (let i = 0; i < 30; i++) {
+    px(300 - i + 10, 140 - i, 140 + (i - 10) * 2 - 20, 2, warm ? "#4a2030" : "#2a1820");
+  }
+  // Door
+  px(350, 180, 22, 40, warm ? "#5a3020" : "#2a1a10");
+  px(368, 200, 3, 3, warm ? "#f2d98a" : "#555548");
+  // Windows
+  const winC = warm ? "#f2d98a" : "#1a1a22";
+  const frameC = warm ? "#2a2040" : "#1a1828";
+  px(312, 158, 24, 18, winC);
+  px(312, 158, 24, 2, frameC);
+  px(323, 158, 2, 18, frameC);
+  px(400, 158, 24, 18, winC);
+  px(400, 158, 24, 2, frameC);
+  px(411, 158, 2, 18, frameC);
+  // Porch light
+  px(340, 172, 6, 6, warm ? "#f2d98a" : "#333338");
+  px(340, 170, 6, 2, frameC);
+}
+
+// ==========================================
+// ENDING 1: Family ending (fired, not divorced)
+// ==========================================
+function showFamilyEnding() {
+  const { overlay, cvs, ctx, W, H } = openCutscene();
   const px = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x, y, w, h); };
   const female = isFemale();
 
-  // Animation state
-  let lawyerX = -60;       // lawyer walks in from off-screen left
-  const lawyerTargetX = 160; // stops next to family
-  const familyX = 260;      // spouse + kids standing here
-  let phase = "walk";       // walk -> embrace -> fadeout
+  let lawyerX = -60;
+  const lawyerTargetX = 160;
+  const familyX = 260;
+  let phase = "walk";
   let fadeAlpha = 0;
   let embraceTimer = 0;
-  let smileDone = false;
-
-  function drawSky() {
-    // Warm evening sky (not the cold office)
-    px(0, 0, W, 140, "#1a1030");
-    px(0, 0, W, 50, "#0e0820");
-    px(0, 50, W, 40, "#241838");
-    px(0, 90, W, 50, "#3a2040");
-
-    // Warm sunset glow at horizon
-    px(0, 130, W, 10, "#6a3838");
-    px(0, 136, W, 4, "#c87050");
-
-    // Stars
-    const starSeed = 42;
-    for (let i = 0; i < 30; i++) {
-      const sx = ((starSeed * (i + 1) * 7) % W);
-      const sy = ((starSeed * (i + 1) * 3) % 100);
-      px(sx, sy, 2, 2, i % 3 === 0 ? "#f2d98a" : "#cfe1ff");
-    }
-  }
-
-  function drawHouse() {
-    // Grass
-    px(0, 220, W, 80, "#1a3a1a");
-    px(0, 220, W, 4, "#2b5a2a");
-
-    // Sidewalk
-    px(0, 250, W, 8, "#3a3a3a");
-
-    // House body
-    px(300, 140, 140, 80, "#2a2040");
-    // Roof
-    for (let i = 0; i < 30; i++) {
-      px(300 - i + 10, 140 - i, 140 + (i - 10) * 2 - 20, 2, "#4a2030");
-    }
-    // Door
-    px(350, 180, 22, 40, "#5a3020");
-    px(368, 200, 3, 3, "#f2d98a"); // doorknob
-    // Windows (warm glow)
-    px(312, 158, 24, 18, "#f2d98a");
-    px(312, 158, 24, 2, "#2a2040");
-    px(323, 158, 2, 18, "#2a2040");
-    px(400, 158, 24, 18, "#f2d98a");
-    px(400, 158, 24, 2, "#2a2040");
-    px(411, 158, 2, 18, "#2a2040");
-
-    // Porch light
-    px(340, 172, 6, 6, "#f2d98a");
-    px(340, 170, 6, 2, "#2a2040");
-  }
-
-  function drawSprite(x, y, isFemaleSprite, scale) {
-    // Simplified sprite drawing (standing, casual)
-    const s = scale || 1;
-    const p = (rx, ry, rw, rh, c) => px(x + rx * s, y + ry * s, rw * s, rh * s, c);
-
-    if (isFemaleSprite) {
-      // Body
-      p(2, 0, 26, 28, "#1f2740");
-      p(6, 4, 6, 16, "#2a3554");
-      p(18, 4, 6, 16, "#2a3554");
-      p(12, 4, 6, 20, "#d9dbe6");
-      // Skirt
-      p(4, 26, 22, 6, "#1f2740");
-      // Arms
-      p(-4, 6, 6, 16, "#1f2740");
-      p(28, 6, 6, 16, "#1f2740");
-      // Legs
-      p(6, 32, 6, 10, "#b9926a");
-      p(18, 32, 6, 10, "#b9926a");
-      // Head
-      p(5, -16, 20, 16, "#b9926a");
-      // Long hair
-      p(3, -18, 24, 6, "#5b3a29");
-      p(1, -14, 4, 16, "#5b3a29");
-      p(25, -14, 4, 16, "#5b3a29");
-      // Earrings
-      p(2, -4, 2, 3, "#f2d98a");
-      p(26, -4, 2, 3, "#f2d98a");
-    } else {
-      // Body (suit)
-      p(0, 0, 30, 30, "#1f2740");
-      p(4, 4, 6, 18, "#2a3554");
-      p(20, 4, 6, 18, "#2a3554");
-      p(12, 4, 6, 22, "#d9dbe6");
-      // Tie
-      p(14, 8, 2, 16, "#2a3040");
-      p(13, 8, 4, 3, "#2a3040");
-      // Arms
-      p(-6, 6, 6, 18, "#1f2740");
-      p(30, 6, 6, 18, "#1f2740");
-      // Legs
-      p(6, 30, 7, 12, "#1a1a2a");
-      p(17, 30, 7, 12, "#1a1a2a");
-      // Head
-      p(5, -16, 20, 16, "#b9926a");
-      // Short hair
-      p(5, -16, 20, 4, "#5b3a29");
-    }
-  }
-
-  function drawSmile(x, y, isFemaleSprite, scale) {
-    const s = scale || 1;
-    const p = (rx, ry, rw, rh, c) => px(x + rx * s, y + ry * s, rw * s, rh * s, c);
-    // Eyes
-    p(isFemaleSprite ? 9 : 9, -10, 3, 2, "#1a1a1a");
-    p(isFemaleSprite ? 18 : 18, -10, 3, 2, "#1a1a1a");
-    // Smile (curved up)
-    p(isFemaleSprite ? 11 : 11, -4, 8, 1, "#1a1a1a");
-    p(isFemaleSprite ? 10 : 10, -5, 2, 1, "#1a1a1a");
-    p(isFemaleSprite ? 19 : 19, -5, 2, 1, "#1a1a1a");
-  }
-
-  function drawNeutralFace(x, y, isFemaleSprite, scale) {
-    const s = scale || 1;
-    const p = (rx, ry, rw, rh, c) => px(x + rx * s, y + ry * s, rw * s, rh * s, c);
-    p(isFemaleSprite ? 9 : 9, -10, 3, 2, "#1a1a1a");
-    p(isFemaleSprite ? 18 : 18, -10, 3, 2, "#1a1a1a");
-    p(isFemaleSprite ? 11 : 11, -4, 6, 1, "#1a1a1a");
-  }
-
-  function drawChild(x, y, childIdx) {
-    const s = 0.7;
-    const p = (rx, ry, rw, rh, c) => px(x + rx * s, y + ry * s, rw * s, rh * s, c);
-    // Small body
-    p(2, 0, 18, 18, childIdx === 0 ? "#3a4a6a" : "#6a3a4a");
-    // Arms
-    p(-3, 4, 5, 10, childIdx === 0 ? "#3a4a6a" : "#6a3a4a");
-    p(20, 4, 5, 10, childIdx === 0 ? "#3a4a6a" : "#6a3a4a");
-    // Legs
-    p(4, 18, 5, 8, "#1a1a2a");
-    p(13, 18, 5, 8, "#1a1a2a");
-    // Head
-    p(3, -12, 16, 12, "#c9a27a");
-    // Hair
-    p(3, -12, 16, 4, childIdx === 0 ? "#5b3a29" : "#8b5a39");
-    // Eyes (always happy)
-    p(6, -7, 2, 2, "#1a1a1a");
-    p(13, -7, 2, 2, "#1a1a1a");
-    // Smile
-    p(8, -3, 6, 1, "#1a1a1a");
-    p(7, -4, 2, 1, "#1a1a1a");
-    p(14, -4, 2, 1, "#1a1a1a");
-  }
 
   function drawFrame() {
     ctx.clearRect(0, 0, W, H);
+    drawWarmSky(px, W);
+    drawCutsceneHouse(px, true);
 
-    drawSky();
-    drawHouse();
-
-    // Spouse (standing on porch area, opposite gender from player)
+    // Spouse
     const spouseY = 200;
-    drawSprite(familyX, spouseY, !female, 1);
-    drawSmile(familyX, spouseY, !female, 1);
+    drawCutsceneSprite(px, familyX, spouseY, !female, 1);
+    drawCutsceneSmile(px, familyX, spouseY, !female, 1);
 
-    // Kids (two children flanking the spouse)
-    drawChild(familyX - 30, spouseY + 12, 0);
-    drawChild(familyX + 36, spouseY + 12, 1);
+    // Kids
+    drawCutsceneChild(px, familyX - 30, spouseY + 12, 0);
+    drawCutsceneChild(px, familyX + 36, spouseY + 12, 1);
 
-    // Lawyer (walking or standing)
+    // Lawyer
     const lawyerY = 200;
-    drawSprite(lawyerX, lawyerY, female, 1);
-
+    drawCutsceneSprite(px, lawyerX, lawyerY, female, 1);
     if (phase === "walk") {
-      drawNeutralFace(lawyerX, lawyerY, female, 1);
+      drawCutsceneNeutral(px, lawyerX, lawyerY, female, 1);
     } else {
-      drawSmile(lawyerX, lawyerY, female, 1);
+      drawCutsceneSmile(px, lawyerX, lawyerY, female, 1);
     }
 
-    // Raised arms on kids when lawyer is close
+    // Kids raise arms when lawyer is close
     if (lawyerX >= lawyerTargetX - 30) {
-      // Kid left: raised arm toward lawyer
       const s = 0.7;
       px(familyX - 30 + (-3) * s, (spouseY + 12) + (-2) * s, 5 * s, 6 * s, "#3a4a6a");
-      // Kid right: raised arm toward lawyer
       px(familyX + 36 + 20 * s, (spouseY + 12) + (-2) * s, 5 * s, 6 * s, "#6a3a4a");
     }
 
-    // Fade to black
     if (fadeAlpha > 0) {
       ctx.fillStyle = `rgba(0,0,0,${fadeAlpha})`;
       ctx.fillRect(0, 0, W, H);
     }
   }
 
-  // Animation loop
   let animFrame;
   function animate() {
     if (phase === "walk") {
@@ -3208,45 +3242,86 @@ function showFamilyEnding() {
       }
     } else if (phase === "embrace") {
       embraceTimer++;
-      // After ~2 seconds of standing together, start fade
-      if (embraceTimer > 120) {
-        phase = "fadeout";
-      }
+      if (embraceTimer > 120) phase = "fadeout";
     } else if (phase === "fadeout") {
       fadeAlpha += 0.008;
       if (fadeAlpha >= 1) {
         fadeAlpha = 1;
         cancelAnimationFrame(animFrame);
-        // Show text after full fade
-        drawFrame();
-        setTimeout(() => {
-          const textEl = $("cutscene-text");
-          textEl.textContent = "You were fired, but your family has never been happier to see you.";
-          textEl.classList.add("visible");
-        }, 800);
-        setTimeout(() => {
-          const btn = $("btn-cutscene-close");
-          btn.style.display = "";
-          btn.classList.add("visible");
-        }, 3500);
+        finishCutscene(drawFrame, "You were fired, but your family has never been happier to see you.");
         return;
       }
     }
-
     drawFrame();
     animFrame = requestAnimationFrame(animate);
   }
 
-  // Close button
-  $("btn-cutscene-close").onclick = () => {
-    overlay.style.display = "none";
-    $("cutscene-text").classList.remove("visible");
-    $("btn-cutscene-close").classList.remove("visible");
-    $("btn-cutscene-close").style.display = "none";
-    $("cutscene-text").textContent = "";
-  };
+  animFrame = requestAnimationFrame(animate);
+}
 
-  // Start the animation
+// ==========================================
+// ENDING 2: Divorce ending (fired + divorced)
+// ==========================================
+function showDivorceEnding() {
+  const { overlay, cvs, ctx, W, H } = openCutscene();
+  const px = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x, y, w, h); };
+  const female = isFemale();
+
+  let lawyerX = -60;
+  const lawyerTargetX = 220; // walks to the empty porch, alone
+  let phase = "walk";
+  let fadeAlpha = 0;
+  let standTimer = 0;
+
+  function drawFrame() {
+    ctx.clearRect(0, 0, W, H);
+    drawColdSky(px, W);
+    drawCutsceneHouse(px, false);
+
+    // No family — empty porch
+
+    // Lawyer
+    const lawyerY = 200;
+    drawCutsceneSprite(px, lawyerX, lawyerY, female, 1);
+
+    if (phase === "walk") {
+      drawCutsceneNeutral(px, lawyerX, lawyerY, female, 1);
+    } else {
+      drawCutsceneSadFace(px, lawyerX, lawyerY, female, 1);
+    }
+
+    if (fadeAlpha > 0) {
+      ctx.fillStyle = `rgba(0,0,0,${fadeAlpha})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+
+  let animFrame;
+  function animate() {
+    if (phase === "walk") {
+      lawyerX += 1.2; // slower, heavier walk
+      if (lawyerX >= lawyerTargetX) {
+        lawyerX = lawyerTargetX;
+        phase = "stand";
+        standTimer = 0;
+      }
+    } else if (phase === "stand") {
+      standTimer++;
+      // Stand alone for ~3 seconds, then fade
+      if (standTimer > 180) phase = "fadeout";
+    } else if (phase === "fadeout") {
+      fadeAlpha += 0.006; // slower, heavier fade
+      if (fadeAlpha >= 1) {
+        fadeAlpha = 1;
+        cancelAnimationFrame(animFrame);
+        finishCutscene(drawFrame, "You lost everything. But at what cost?");
+        return;
+      }
+    }
+    drawFrame();
+    animFrame = requestAnimationFrame(animate);
+  }
+
   animFrame = requestAnimationFrame(animate);
 }
 
