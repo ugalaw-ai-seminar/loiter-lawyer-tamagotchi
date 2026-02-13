@@ -21,9 +21,30 @@ const RANKS = [
 ];
 
 const PERK_DEFS = [
-  { id: "nightOwl",     name: "Night Owl",     cost: 600,  rankReq: 1, desc: "Sleep penalty on productivity reduced by 45%." },
-  { id: "masterBiller", name: "Master Biller", cost: 1200, rankReq: 2, desc: "+12% billable hours earned on completed tasks." },
-  { id: "goldenVoice",  name: "Golden Voice",  cost: 1800, rankReq: 3, desc: "+25% reputation gain on litigation assignments." }
+  {
+    id: "nightOwl",
+    name: "Night Owl",
+    desc: "Sleep penalty on productivity reduced by 45%.",
+    requirement: "Complete 5 assignments while sleep is below 30.",
+    threshold: 5,
+    progressFn: () => state.perkProgress.nightOwlTasks,
+  },
+  {
+    id: "masterBiller",
+    name: "Master Biller",
+    desc: "+12% billable hours earned on completed tasks.",
+    requirement: "Accumulate 500 lifetime billable hours.",
+    threshold: 500,
+    progressFn: () => Math.floor(state.billables),
+  },
+  {
+    id: "goldenVoice",
+    name: "Golden Voice",
+    desc: "+25% reputation gain on litigation assignments.",
+    requirement: "Complete 8 litigation assignments.",
+    threshold: 8,
+    progressFn: () => state.perkProgress.litTasksCompleted,
+  }
 ];
 
 const ACHIEVEMENT_DEFS = [
@@ -54,8 +75,8 @@ const ACHIEVEMENT_DEFS = [
   { id: "breakaway_1",      name: "Fresh Start",        desc: "Complete a breakaway.",               check: () => state.breakaway.count >= 1 },
   { id: "breakaway_3",      name: "Serial Entrepreneur", desc: "Complete 3 breakaways.",             check: () => state.breakaway.count >= 3 },
   // Perks & store
-  { id: "buy_perk",         name: "Self-Investment",    desc: "Unlock any perk.",                    check: () => state.perks.nightOwl || state.perks.masterBiller || state.perks.goldenVoice },
-  { id: "all_perks",        name: "Fully Loaded",       desc: "Unlock all three perks.",             check: () => state.perks.nightOwl && state.perks.masterBiller && state.perks.goldenVoice },
+  { id: "buy_perk",         name: "Self-Investment",    desc: "Earn any perk.",                      check: () => state.perks.nightOwl || state.perks.masterBiller || state.perks.goldenVoice },
+  { id: "all_perks",        name: "Fully Loaded",       desc: "Earn all three perks.",               check: () => state.perks.nightOwl && state.perks.masterBiller && state.perks.goldenVoice },
   { id: "buy_item",         name: "Retail Therapy",     desc: "Buy something from the store.",       check: () => state.lawyer.outfit.hat || state.lawyer.outfit.tie || state.lawyer.outfit.casualFridays || state.store.fridge || state.store.coffeeMaker || state.store.desk },
 ];
 
@@ -111,6 +132,12 @@ const defaultState = () => ({
     nightOwl: false,
     masterBiller: false,
     goldenVoice: false
+  },
+
+  perkProgress: {
+    nightOwlTasks: 0,       // assignments completed while sleep < 30
+    litTasksCompleted: 0    // litigation assignments completed (for goldenVoice)
+    // masterBiller uses state.billables directly
   },
 
   stats: {
@@ -251,62 +278,41 @@ $("btn-new").addEventListener("click", () => {
   renderAll();
 });
 
-function buyPerk(perkId) {
-  const def = PERK_DEFS.find(p => p.id === perkId);
-  if (!def) return;
-  if (state.perks[perkId]) { log("Already owned."); return; }
-  if (rankIndex() < def.rankReq) { log(`Requires rank: ${RANKS[def.rankReq].name}.`); return; }
-  if (state.money < def.cost) { log("Not enough money."); return; }
-  state.money -= def.cost;
-  state.perks[perkId] = true;
-  log(`Perk unlocked: ${def.name}!`);
-  renderAll();
+function checkPerkUnlocks() {
+  for (const perk of PERK_DEFS) {
+    if (state.perks[perk.id]) continue;
+    if (perk.progressFn() >= perk.threshold) {
+      state.perks[perk.id] = true;
+      log(`Perk unlocked: ${perk.name}! ${perk.desc}`);
+    }
+  }
 }
 
 function renderPerks() {
   const wrap = $("perk-list");
   wrap.innerHTML = "";
-  const ri = rankIndex();
 
-  for (const def of PERK_DEFS) {
-    const owned = !!state.perks[def.id];
-    const meetsRank = ri >= def.rankReq;
-    const canAfford = state.money >= def.cost;
+  for (const perk of PERK_DEFS) {
+    const unlocked = state.perks[perk.id];
+    const progress = perk.progressFn();
+    const pct = Math.min(100, Math.round((progress / perk.threshold) * 100));
 
     const card = document.createElement("div");
-    card.className = "perk-card" + (owned ? " owned" : "") + (!meetsRank ? " locked" : "");
-
-    let statusHtml = "";
-    if (owned) {
-      statusHtml = '<span class="perk-status perk-active">Active</span>';
-    } else if (!meetsRank) {
-      statusHtml = '<span class="perk-status perk-locked-tag">Locked</span>';
-    }
-
-    let reqText = `Requires: ${RANKS[def.rankReq].name}`;
-    if (!meetsRank) reqText += " (not yet reached)";
-
-    let buttonHtml = "";
-    if (!owned) {
-      if (!meetsRank) {
-        buttonHtml = `<button disabled>Locked — ${RANKS[def.rankReq].name}</button>`;
-      } else {
-        buttonHtml = `<button class="btn-buy-perk" data-perk="${def.id}" ${!canAfford ? "disabled" : ""}>Buy ($${def.cost})</button>`;
-      }
-    }
-
+    card.className = "perk-card" + (unlocked ? " unlocked" : "");
     card.innerHTML = `
-      <div class="perk-name">${def.name} ${statusHtml}</div>
-      <div class="perk-desc">${def.desc}</div>
-      <div class="perk-req">${reqText} · $${def.cost}</div>
-      ${buttonHtml}
+      <div class="perk-top">
+        <div class="perk-name">${perk.name}${unlocked ? ' <span class="tag tag-done">Unlocked</span>' : ""}</div>
+      </div>
+      <div class="perk-desc">${perk.desc}</div>
+      ${unlocked
+        ? ""
+        : `<div class="perk-req">${perk.requirement}</div>
+           <div class="perk-progress-label">${progress} / ${perk.threshold}</div>
+           <div class="progress"><div class="pfill" style="width:${pct}%"></div></div>`
+      }
     `;
     wrap.appendChild(card);
   }
-
-  wrap.querySelectorAll("[data-perk]").forEach(btn => {
-    btn.addEventListener("click", () => buyPerk(btn.getAttribute("data-perk")));
-  });
 }
 
 // ---------- Achievements ----------
@@ -1688,6 +1694,12 @@ function tick(dtMs) {
       if (a.kind === "reg") state.reputation.reg += repGain;
       if (a.kind === "probono") state.reputation.reg += 2;
 
+      // Track perk progress
+      if (state.stats.sleep < 30) state.perkProgress.nightOwlTasks += 1;
+      if (a.kind === "lit") state.perkProgress.litTasksCompleted += 1;
+      // masterBiller tracks via state.billables (already incremented above)
+      checkPerkUnlocks();
+
       log(`Completed: ${a.title}. +$${earnedPoints}, +rep.`);
     }
   }
@@ -2301,6 +2313,7 @@ function init() {
   if (state.money === undefined) { state.money = state.points || 0; delete state.points; }
   if (!state.bitcoin) state.bitcoin = { holdings: 0, totalInvested: 0, lastPrice: 0, stressCheckPrice: 0, lastStressCheckAt: 0 };
   if (!state.perks) state.perks = { nightOwl: false, masterBiller: false, goldenVoice: false };
+  if (!state.perkProgress) state.perkProgress = { nightOwlTasks: 0, litTasksCompleted: 0 };
   if (!state.achievements) state.achievements = [];
 
   initSettingsUI();
