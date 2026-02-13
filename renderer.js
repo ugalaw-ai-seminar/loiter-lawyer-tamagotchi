@@ -77,7 +77,7 @@ const ACHIEVEMENT_DEFS = [
   // Perks & store
   { id: "buy_perk",         name: "Self-Investment",    desc: "Earn any perk.",                      check: () => state.perks.nightOwl || state.perks.masterBiller || state.perks.goldenVoice },
   { id: "all_perks",        name: "Fully Loaded",       desc: "Earn all three perks.",               check: () => state.perks.nightOwl && state.perks.masterBiller && state.perks.goldenVoice },
-  { id: "buy_item",         name: "Retail Therapy",     desc: "Buy something from the store.",       check: () => state.lawyer.outfit.hat || state.lawyer.outfit.tie || state.lawyer.outfit.casualFridays || state.store.fridge || state.store.coffeeMaker || state.store.desk },
+  { id: "buy_item",         name: "Retail Therapy",     desc: "Buy something from the store.",       check: () => state.lawyer.outfit.hat || state.lawyer.outfit.tie || state.lawyer.outfit.casualFridays || state.store.fridge || state.store.coffeeMaker || state.store.desk || state.store.designerWatch || state.store.golfClubs || state.store.leatherBriefcase || state.store.espressoMachine || state.store.cornerOfficeArt || state.store.monogrammedPen },
   // Minigames
   { id: "first_minigame",   name: "Recess",              desc: "Win your first minigame.",            check: () => state.minigameBoost && state.minigameBoost.gamesWon >= 1 },
   { id: "minigame_5",       name: "Corner Office Arcade", desc: "Win 5 minigames.",                   check: () => state.minigameBoost && state.minigameBoost.gamesWon >= 5 },
@@ -173,7 +173,13 @@ const defaultState = () => ({
   store: {
     fridge: false,
     coffeeMaker: false,
-    desk: false
+    desk: false,
+    designerWatch: false,
+    golfClubs: false,
+    leatherBriefcase: false,
+    espressoMachine: false,
+    cornerOfficeArt: false,
+    monogrammedPen: false
   },
 
   perks: {
@@ -426,9 +432,12 @@ function renderAchievements() {
 
 // ---------- Assistant actions ----------
 $("btn-coffee").addEventListener("click", () => {
-  state.stats.caffeine = clamp(state.stats.caffeine + 35, 0, 100);
+  const coffeeBoost = state.store.espressoMachine ? 46 : 35;
+  state.stats.caffeine = clamp(state.stats.caffeine + coffeeBoost, 0, 100);
   state.stats.stress = clamp(state.stats.stress - 2, 0, 100);
-  log("Refilled coffee pot. Caffeine up.");
+  log(state.store.espressoMachine
+    ? "Pulled a double shot. The espresso machine earns its keep. Caffeine way up."
+    : "Refilled coffee pot. Caffeine up.");
 });
 
 $("btn-food").addEventListener("click", () => {
@@ -550,6 +559,12 @@ function applyItemEffect(item) {
   else if (key === "fridge") state.store.fridge = true;
   else if (key === "coffeeMaker") state.store.coffeeMaker = true;
   else if (key === "desk") state.store.desk = true;
+  else if (key === "designerWatch") state.store.designerWatch = true;
+  else if (key === "golfClubs") state.store.golfClubs = true;
+  else if (key === "leatherBriefcase") state.store.leatherBriefcase = true;
+  else if (key === "espressoMachine") state.store.espressoMachine = true;
+  else if (key === "cornerOfficeArt") state.store.cornerOfficeArt = true;
+  else if (key === "monogrammedPen") state.store.monogrammedPen = true;
   else if (item.effect && item.effect.target) {
     // Generic effect path for new API-sourced items (e.g. "store.newItem")
     const parts = item.effect.target.split(".");
@@ -570,6 +585,12 @@ function isItemOwned(item) {
   if (key === "fridge") return !!state.store.fridge;
   if (key === "coffeeMaker") return !!state.store.coffeeMaker;
   if (key === "desk") return !!state.store.desk;
+  if (key === "designerWatch") return !!state.store.designerWatch;
+  if (key === "golfClubs") return !!state.store.golfClubs;
+  if (key === "leatherBriefcase") return !!state.store.leatherBriefcase;
+  if (key === "espressoMachine") return !!state.store.espressoMachine;
+  if (key === "cornerOfficeArt") return !!state.store.cornerOfficeArt;
+  if (key === "monogrammedPen") return !!state.store.monogrammedPen;
   // Generic check for API items
   if (item.effect && item.effect.target) {
     const parts = item.effect.target.split(".");
@@ -1774,6 +1795,9 @@ function productivityMultiplier() {
   if (state.office.bookshelfBuffUntil > now()) mult *= 1.08;
   if (state.lawyer.outfit.casualFridays && isFriday(now())) mult *= 1.04;
 
+  // Store items
+  if (state.store.designerWatch) mult *= 1.05;
+
   // Burnout: massive productivity penalty
   if (state.burnout && state.burnoutUntil > now()) mult *= 0.35;
 
@@ -1820,6 +1844,8 @@ function tick(dtMs) {
   const workload = state.queue.length;
   let stressRise = (0.22 + workload * 0.08) * dtHours;
   if (state.store.desk) stressRise *= 0.78;
+  if (state.store.cornerOfficeArt) stressRise *= 0.90;
+  if (state.store.golfClubs) stressRise *= 0.85;
   if (state.lawyer.outfit.casualFridays && isFriday(now())) stressRise *= 0.9;
 
   // Divorced: +40% passive stress rise
@@ -1833,7 +1859,7 @@ function tick(dtMs) {
     if (a.progress >= 1) continue;
 
     const workHoursThisTick = prod * dtHours;
-    const billableGainMult = (state.perks.masterBiller ? 1.12 : 1.0) * state.breakaway.multiplier;
+    const billableGainMult = (state.perks.masterBiller ? 1.12 : 1.0) * (state.store.monogrammedPen ? 1.08 : 1.0) * state.breakaway.multiplier;
 
     const remainingBillables = a.billableHours - a.billablesEarned;
     const billablesToAdd = Math.min(remainingBillables, workHoursThisTick * billableGainMult);
@@ -1863,6 +1889,7 @@ function tick(dtMs) {
       let repGain = Math.max(4, Math.round(a.billableHours * 1.2));
       if (state.perks.goldenVoice && a.kind === "lit") repGain = Math.round(repGain * 1.25);
       if (state.lawyer.outfit.tie) repGain += 1;
+      if (state.store.leatherBriefcase) repGain = Math.round(repGain * 1.15);
       repGain = Math.round(repGain * state.breakaway.multiplier);
 
       if (a.kind === "lit") state.reputation.lit += repGain;
@@ -3379,6 +3406,13 @@ function init() {
   if (!state.minigameBoost) state.minigameBoost = { litBoostUntil: 0, corpBoostUntil: 0, gamesPlayed: 0, gamesWon: 0 };
   if (!state.holidaysTriggered) state.holidaysTriggered = [];
   if (state.lawyer.name === undefined) state.lawyer.name = "";
+  // Store item migrations
+  if (state.store.designerWatch === undefined) state.store.designerWatch = false;
+  if (state.store.golfClubs === undefined) state.store.golfClubs = false;
+  if (state.store.leatherBriefcase === undefined) state.store.leatherBriefcase = false;
+  if (state.store.espressoMachine === undefined) state.store.espressoMachine = false;
+  if (state.store.cornerOfficeArt === undefined) state.store.cornerOfficeArt = false;
+  if (state.store.monogrammedPen === undefined) state.store.monogrammedPen = false;
 
   // Show character creation on first boot (no save found)
   if (_isFirstBoot) {

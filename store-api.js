@@ -63,6 +63,54 @@ const BUILTIN_ITEMS = [
     cost: 900,
     category: "upgrade",
     effect: { target: "store.desk", value: true }
+  },
+  {
+    id: "designerWatch",
+    name: "Designer Watch",
+    description: "A Rolex Submariner. +5% productivity. Impresses absolutely nobody at the firm.",
+    cost: 1200,
+    category: "cosmetic",
+    effect: { target: "store.designerWatch", value: true }
+  },
+  {
+    id: "golfClubs",
+    name: "Golf Clubs",
+    description: "Titleist AP2 irons. Passive stress decay +15%. For 'networking,' obviously.",
+    cost: 1500,
+    category: "upgrade",
+    effect: { target: "store.golfClubs", value: true }
+  },
+  {
+    id: "leatherBriefcase",
+    name: "Leather Briefcase",
+    description: "Italian calfskin. Reputation gains +15%. You look like you bill $800/hr.",
+    cost: 1000,
+    category: "upgrade",
+    effect: { target: "store.leatherBriefcase", value: true }
+  },
+  {
+    id: "espressoMachine",
+    name: "Espresso Machine",
+    description: "La Marzocca Linea Mini. Coffee action gives +30% more caffeine.",
+    cost: 1100,
+    category: "upgrade",
+    effect: { target: "store.espressoMachine", value: true }
+  },
+  {
+    id: "cornerOfficeArt",
+    name: "Corner Office Art",
+    description: "A framed Rothko print. Passive stress rise -10%. It 'speaks to you.'",
+    cost: 750,
+    category: "cosmetic",
+    effect: { target: "store.cornerOfficeArt", value: true }
+  },
+  {
+    id: "monogrammedPen",
+    name: "Monogrammed Pen",
+    description: "Montblanc Meisterstück. Billable hour gains +8%. The ink flows like settlements.",
+    cost: 600,
+    category: "upgrade",
+    effect: { target: "store.monogrammedPen", value: true }
   }
 ];
 
