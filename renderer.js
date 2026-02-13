@@ -127,6 +127,11 @@ function isSameDay(ts, date) {
 
 function isCincoDeMayo(ts) { const d = new Date(ts); return d.getMonth() === 4 && d.getDate() === 5; }
 
+// --- Pronoun helpers ---
+function isFemale() { return state.lawyer.gender === "female"; }
+function pn(male, female) { return isFemale() ? female : male; }
+function lawyerName() { return state.lawyer.name || "Associate"; }
+
 function nextChristmasPartyTimestamp(fromTs) {
   // Thursday before Dec 25 (real-world). If already passed this year's party, compute next year's.
   const d = new Date(fromTs);
@@ -150,6 +155,7 @@ const defaultState = () => ({
   dismissed: false,
 
   lawyer: {
+    name: "",
     gender: "male",
     hair: "brown",
     eyes: "blue",
@@ -267,7 +273,9 @@ const defaultState = () => ({
   }
 });
 
-let state = load() || defaultState();
+const _loaded = load();
+const _isFirstBoot = !_loaded;
+let state = _loaded || defaultState();
 
 // Minigame tracking (declared early, used by tick and minigame systems)
 let minigameActive = false;
@@ -330,9 +338,11 @@ $("btn-load").addEventListener("click", () => {
 });
 $("btn-new").addEventListener("click", () => {
   state = defaultState();
-  seedOffers(true);
-  log("New game started.");
-  renderAll();
+  showCharacterCreation(() => {
+    seedOffers(true);
+    log(`New game started. Welcome to the firm, ${lawyerName()}.`);
+    renderAll();
+  });
 });
 
 function checkPerkUnlocks() {
@@ -937,7 +947,7 @@ function checkWorkSpiral() {
   if (state.workChoices >= 5 && !state.divorced) {
     state.divorced = true;
     state.stats.stress = clamp(state.stats.stress + 25, 0, 100);
-    log("Your spouse filed for divorce. The papers arrived between two billing statements.");
+    log(`Your ${pn("wife", "husband")} filed for divorce. The papers arrived between two billing statements.`);
     log("Stress permanently elevated. Was it worth it?");
   }
 
@@ -959,7 +969,7 @@ function checkFamilySpiral() {
     state.pipStrikes += 1;
     state.familyChoices = 0; // Reset so they can accumulate again
     log("HR called. Your 'work-life balance' has been noticed. PIP strike issued.");
-    log("The firm doesn't care about your daughter's recital.");
+    log(`The firm doesn't care about your ${pn("daughter", "son")}'s recital.`);
   }
 }
 
@@ -1021,34 +1031,34 @@ function triggerRandomEvent() {
     },
     {
       type: "work_family",
-      name: "Your daughter's dance recital is tonight. There's also a client dinner.",
+      name: `Your ${pn("daughter", "son")}'s dance recital is tonight. There's also a client dinner.`,
       a: { label: "Skip the recital, attend the dinner ($100 + rep)", effect: () => {
         state.stats.stress = clamp(state.stats.stress + 6, 0, 100);
         state.money += 100;
         state.reputation.corp += 5;
-        log("You went to the dinner. +$100, +rep. Your daughter wasn't impressed.");
+        log(`You went to the dinner. +$100, +rep. Your ${pn("daughter", "son")} wasn't impressed.`);
         choseWork();
       }},
       b: { label: "Go to the recital (stress down)", effect: () => {
         state.stats.stress = clamp(state.stats.stress - 12, 0, 100);
-        log("You watched her dance. She saw you in the audience and smiled. Stress way down.");
+        log(`You watched ${pn("her", "him")} dance. ${pn("She", "He")} saw you in the audience and smiled. Stress way down.`);
         choseFamily();
       }}
     },
     {
       type: "work_family",
-      name: "Your son's baseball game is Saturday. A partner wants you in the office.",
+      name: `Your ${pn("son", "daughter")}'s baseball game is Saturday. A partner wants you in the office.`,
       a: { label: "Work Saturday ($95)", effect: () => {
         state.stats.stress = clamp(state.stats.stress + 8, 0, 100);
         state.stats.sleep = clamp(state.stats.sleep - 4, 0, 100);
         state.money += 95;
-        log("Another Saturday at the office. +$95. Your son hit a home run. You heard about it later.");
+        log(`Another Saturday at the office. +$95. Your ${pn("son", "daughter")} hit a home run. You heard about it later.`);
         choseWork();
       }},
       b: { label: "Go to the game (stress down)", effect: () => {
         state.stats.stress = clamp(state.stats.stress - 10, 0, 100);
         state.stats.sleep = clamp(state.stats.sleep + 2, 0, 100);
-        log("You saw the home run. He ran to you after. Sometimes the small things aren't small.");
+        log(`You saw the home run. ${pn("He", "She")} ran to you after. Sometimes the small things aren't small.`);
         choseFamily();
       }}
     },
@@ -1059,14 +1069,14 @@ function triggerRandomEvent() {
         state.stats.stress = clamp(state.stats.stress + 12, 0, 100);
         state.money += 140;
         state.reputation.corp += 4;
-        log("The deal closed at 2 AM. +$140, +rep. Your spouse ate alone. Again.");
+        log(`The deal closed at 2 AM. +$140, +rep. Your ${pn("wife", "husband")} ate alone. Again.`);
         choseWork();
       }},
       b: { label: "Go to dinner (stress down, risk rep)", effect: () => {
         state.stats.stress = clamp(state.stats.stress - 14, 0, 100);
         if (Math.random() < 0.3) {
           state.reputation.corp = clamp(state.reputation.corp - 4, 0, 9999);
-          log("You went to dinner. The partner noticed your absence. Small rep hit — but your spouse was happy.");
+          log(`You went to dinner. The partner noticed your absence. Small rep hit — but your ${pn("wife", "husband")} was happy.`);
         } else {
           log("Dinner was wonderful. Nobody at the firm noticed. A rare win.");
         }
@@ -1685,9 +1695,9 @@ function tickHolidays() {
   if (month === 1 && day === 14 && !holidayFired("valentines")) {
     fireHoliday("valentines");
     if (state.divorced) {
-      log("Happy Valentine's Day. The only thing you hate more than your ex-wife is billing hours.");
+      log(`Happy Valentine's Day. The only thing you hate more than your ex-${pn("wife", "husband")} is billing hours.`);
     } else {
-      log("Happy Valentine's Day. The only thing you love more than your wife is talking about contracts.");
+      log(`Happy Valentine's Day. The only thing you love more than your ${pn("wife", "husband")} is talking about contracts.`);
     }
     state.stats.stress = clamp(state.stats.stress + (state.divorced ? 6 : 3), 0, 100);
   }
@@ -1955,7 +1965,8 @@ function renderStats() {
   $("rep-reg").textContent = Math.floor(state.reputation.reg);
 
   const rankSuffix = state.dismissed ? " — DISMISSED" : (state.breakaway.count > 0 ? ` (Run #${state.breakaway.count + 1})` : "");
-  $("rank").textContent = `Rank: ${rankName()}${rankSuffix}`;
+  const nameLabel = state.lawyer.name ? `${state.lawyer.name} — ` : "";
+  $("rank").textContent = `${nameLabel}${rankName()}${rankSuffix}`;
 }
 
 function renderClock() {
@@ -2164,32 +2175,83 @@ function drawScene() {
     px(140, 292, 240, 2, "#2a3040");
   }
 
-  // lawyer sprite (face attached)
+  // lawyer sprite (gender-aware)
   const s = state.stats;
   const slump = (s.sleep < 25 || s.stress > 85) ? 6 : 0;
   const ax = 240, ay = 150 + slump;
+  const female = isFemale();
 
-  px(ax, ay, 60, 60, "#1f2740");
-  px(ax + 6, ay + 10, 10, 35, "#2a3554");
-  px(ax + 44, ay + 10, 10, 35, "#2a3554");
-  px(ax + 26, ay + 12, 8, 40, "#d9dbe6");
+  if (female) {
+    // --- Female sprite ---
+    // Blazer (slightly tapered)
+    px(ax + 2, ay, 56, 58, "#1f2740");
+    px(ax + 8, ay + 10, 10, 33, "#2a3554");   // left lapel
+    px(ax + 42, ay + 10, 10, 33, "#2a3554");  // right lapel
+    px(ax + 26, ay + 12, 8, 38, "#d9dbe6");   // blouse
 
-  px(ax + 29, ay + 18, 2, 34, state.lawyer.outfit.tie ? "#ff6fb3" : "#2a3040");
-  px(ax + 27, ay + 18, 6, 4, state.lawyer.outfit.tie ? "#ff6fb3" : "#2a3040");
+    // Tie / necklace
+    if (state.lawyer.outfit.tie) {
+      px(ax + 29, ay + 18, 2, 12, "#ff6fb3"); // pendant chain
+      px(ax + 27, ay + 30, 6, 4, "#ff6fb3");  // pendant
+    }
 
-  px(ax - 10, ay + 14, 10, 36, "#1f2740");
-  px(ax + 60, ay + 14, 10, 36, "#1f2740");
+    // Skirt
+    px(ax + 6, ay + 54, 48, 10, "#1f2740");
+    px(ax + 10, ay + 64, 40, 4, "#1f2740");
 
-  const hx = ax + 18, hy = ay - 28;
-  px(hx, hy, 24, 24, "#b9926a");
-  px(hx, hy, 24, 6, "#5b3a29"); // hair
-  px(hx + 6, hy + 10, 3, 3, "#1a1a1a");
-  px(hx + 15, hy + 10, 3, 3, "#1a1a1a");
-  px(hx + 9, hy + 18, 6, 1, "#1a1a1a");
+    // Arms
+    px(ax - 8, ay + 14, 10, 34, "#1f2740");
+    px(ax + 58, ay + 14, 10, 34, "#1f2740");
 
-  if (state.lawyer.outfit.hat) {
-    px(hx - 2, hy - 6, 28, 6, "#6fff9a");
-    px(hx + 2, hy - 10, 20, 4, "#6fff9a");
+    // Head
+    const hx = ax + 18, hy = ay - 28;
+    px(hx, hy, 24, 24, "#b9926a");
+
+    // Longer hair (shoulder length, layered)
+    px(hx - 3, hy - 2, 30, 8, "#5b3a29");     // top
+    px(hx - 4, hy + 4, 4, 18, "#5b3a29");     // left side
+    px(hx + 24, hy + 4, 4, 18, "#5b3a29");    // right side
+    px(hx - 3, hy + 6, 3, 14, "#4a2e22");     // highlight left
+    px(hx + 25, hy + 6, 3, 14, "#4a2e22");    // highlight right
+
+    // Face
+    px(hx + 6, hy + 10, 3, 3, "#1a1a1a");     // left eye
+    px(hx + 15, hy + 10, 3, 3, "#1a1a1a");    // right eye
+    px(hx + 9, hy + 18, 6, 1, "#1a1a1a");     // mouth
+
+    // Earrings
+    px(hx - 1, hy + 16, 2, 3, "#f2d98a");
+    px(hx + 23, hy + 16, 2, 3, "#f2d98a");
+
+    // Hat (if owned)
+    if (state.lawyer.outfit.hat) {
+      px(hx - 4, hy - 6, 32, 6, "#6fff9a");
+      px(hx, hy - 10, 24, 4, "#6fff9a");
+    }
+  } else {
+    // --- Male sprite ---
+    px(ax, ay, 60, 60, "#1f2740");
+    px(ax + 6, ay + 10, 10, 35, "#2a3554");
+    px(ax + 44, ay + 10, 10, 35, "#2a3554");
+    px(ax + 26, ay + 12, 8, 40, "#d9dbe6");
+
+    px(ax + 29, ay + 18, 2, 34, state.lawyer.outfit.tie ? "#ff6fb3" : "#2a3040");
+    px(ax + 27, ay + 18, 6, 4, state.lawyer.outfit.tie ? "#ff6fb3" : "#2a3040");
+
+    px(ax - 10, ay + 14, 10, 36, "#1f2740");
+    px(ax + 60, ay + 14, 10, 36, "#1f2740");
+
+    const hx = ax + 18, hy = ay - 28;
+    px(hx, hy, 24, 24, "#b9926a");
+    px(hx, hy, 24, 6, "#5b3a29"); // hair
+    px(hx + 6, hy + 10, 3, 3, "#1a1a1a");
+    px(hx + 15, hy + 10, 3, 3, "#1a1a1a");
+    px(hx + 9, hy + 18, 6, 1, "#1a1a1a");
+
+    if (state.lawyer.outfit.hat) {
+      px(hx - 2, hy - 6, 28, 6, "#6fff9a");
+      px(hx + 2, hy - 10, 20, 4, "#6fff9a");
+    }
   }
 
   ctx.fillStyle = pal.text;
@@ -2201,6 +2263,17 @@ function drawScene() {
   ctx.font = "10px monospace";
   ctx.fillText("BOOKS", shelfX + 16, shelfY + 12);
   ctx.fillText("DESK", 240, 202);
+
+  // Nameplate on desk
+  if (state.lawyer.name) {
+    ctx.fillStyle = "#1a1a1a";
+    ctx.fillRect(340, 195, 50, 12);
+    ctx.fillStyle = "#f2d98a";
+    ctx.font = "7px monospace";
+    ctx.textAlign = "center";
+    ctx.fillText(state.lawyer.name.substring(0, 8).toUpperCase(), 365, 204);
+    ctx.textAlign = "start";
+  }
 }
 
 // ---------- Arc Rendering ----------
@@ -2883,6 +2956,109 @@ function startContractCrawler() {
   minigameLoop = setInterval(update, 140); // Snake speed: ~7 moves/sec
 }
 
+// ---------- Character Creation ----------
+
+let charCreateGender = "male";
+
+function drawCharPreview(gender) {
+  const cvs = $("charcreate-canvas");
+  if (!cvs) return;
+  const c = cvs.getContext("2d");
+  const W = cvs.width, H = cvs.height;
+  c.clearRect(0, 0, W, H);
+  c.fillStyle = "#0b0c10";
+  c.fillRect(0, 0, W, H);
+
+  const px = (x, y, w, h, col) => { c.fillStyle = col; c.fillRect(x, y, w, h); };
+  const ax = 30, ay = 32;
+
+  if (gender === "female") {
+    // Blazer
+    px(ax + 2, ay, 56, 54, "#1f2740");
+    px(ax + 8, ay + 10, 10, 30, "#2a3554");
+    px(ax + 42, ay + 10, 10, 30, "#2a3554");
+    px(ax + 26, ay + 12, 8, 34, "#d9dbe6");
+    // Skirt
+    px(ax + 6, ay + 50, 48, 10, "#1f2740");
+    px(ax + 10, ay + 60, 40, 4, "#1f2740");
+    // Arms
+    px(ax - 8, ay + 14, 10, 30, "#1f2740");
+    px(ax + 58, ay + 14, 10, 30, "#1f2740");
+    // Head
+    const hx = ax + 18, hy = ay - 28;
+    px(hx, hy, 24, 24, "#b9926a");
+    // Hair (long)
+    px(hx - 3, hy - 2, 30, 8, "#5b3a29");
+    px(hx - 4, hy + 4, 4, 18, "#5b3a29");
+    px(hx + 24, hy + 4, 4, 18, "#5b3a29");
+    px(hx - 3, hy + 6, 3, 14, "#4a2e22");
+    px(hx + 25, hy + 6, 3, 14, "#4a2e22");
+    // Face
+    px(hx + 6, hy + 10, 3, 3, "#1a1a1a");
+    px(hx + 15, hy + 10, 3, 3, "#1a1a1a");
+    px(hx + 9, hy + 18, 6, 1, "#1a1a1a");
+    // Earrings
+    px(hx - 1, hy + 16, 2, 3, "#f2d98a");
+    px(hx + 23, hy + 16, 2, 3, "#f2d98a");
+  } else {
+    // Suit
+    px(ax, ay, 60, 56, "#1f2740");
+    px(ax + 6, ay + 10, 10, 32, "#2a3554");
+    px(ax + 44, ay + 10, 10, 32, "#2a3554");
+    px(ax + 26, ay + 12, 8, 36, "#d9dbe6");
+    px(ax + 29, ay + 18, 2, 30, "#2a3040");
+    px(ax + 27, ay + 18, 6, 4, "#2a3040");
+    // Arms
+    px(ax - 10, ay + 14, 10, 32, "#1f2740");
+    px(ax + 60, ay + 14, 10, 32, "#1f2740");
+    // Head
+    const hx = ax + 18, hy = ay - 28;
+    px(hx, hy, 24, 24, "#b9926a");
+    px(hx, hy, 24, 6, "#5b3a29");
+    px(hx + 6, hy + 10, 3, 3, "#1a1a1a");
+    px(hx + 15, hy + 10, 3, 3, "#1a1a1a");
+    px(hx + 9, hy + 18, 6, 1, "#1a1a1a");
+  }
+}
+
+function showCharacterCreation(onComplete) {
+  const overlay = $("charcreate-overlay");
+  overlay.style.display = "flex";
+  charCreateGender = "male";
+
+  const maleBtn = $("btn-gender-male");
+  const femaleBtn = $("btn-gender-female");
+  const nameInput = $("input-lawyer-name");
+  nameInput.value = "";
+
+  maleBtn.className = "gender-btn selected";
+  femaleBtn.className = "gender-btn";
+
+  drawCharPreview("male");
+
+  maleBtn.onclick = () => {
+    charCreateGender = "male";
+    maleBtn.className = "gender-btn selected";
+    femaleBtn.className = "gender-btn";
+    drawCharPreview("male");
+  };
+
+  femaleBtn.onclick = () => {
+    charCreateGender = "female";
+    femaleBtn.className = "gender-btn selected";
+    maleBtn.className = "gender-btn";
+    drawCharPreview("female");
+  };
+
+  $("btn-charcreate-start").onclick = () => {
+    const name = nameInput.value.trim();
+    state.lawyer.name = name;
+    state.lawyer.gender = charCreateGender;
+    overlay.style.display = "none";
+    onComplete();
+  };
+}
+
 // ---------- Boot ----------
 function saveSilent() {
   try {
@@ -2935,6 +3111,16 @@ function init() {
   if (!state.achievements) state.achievements = [];
   if (!state.minigameBoost) state.minigameBoost = { litBoostUntil: 0, corpBoostUntil: 0, gamesPlayed: 0, gamesWon: 0 };
   if (!state.holidaysTriggered) state.holidaysTriggered = [];
+  if (state.lawyer.name === undefined) state.lawyer.name = "";
+
+  // Show character creation on first boot (no save found)
+  if (_isFirstBoot) {
+    showCharacterCreation(() => {
+      seedOffers(true);
+      log(`Welcome to Lyle Cheatem & Steele, ${lawyerName()}. Don't get comfortable.`);
+      renderAll();
+    });
+  }
 
   initSettingsUI();
 

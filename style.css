@@ -166,6 +166,25 @@ button:disabled { opacity:0.45; cursor:not-allowed; }
 .api-status.error { color:#ff6f6f; }
 .api-status.disconnected { color: var(--muted); }
 
+/* --- Character creation overlay --- */
+.charcreate-overlay { position:fixed; inset:0; z-index:110; background:rgba(0,0,0,0.92); display:flex; align-items:center; justify-content:center; }
+.charcreate-container { background:var(--panel); border:2px solid var(--accent); border-radius:14px; padding:24px; max-width:340px; width:100%; text-align:center; }
+.charcreate-title { font-weight:800; font-size:18px; color:var(--text); margin-bottom:4px; }
+.charcreate-sub { font-size:12px; color:var(--muted); margin-bottom:18px; }
+.charcreate-field { text-align:left; margin-bottom:14px; }
+.charcreate-field label { display:block; color:var(--muted); font-size:11px; margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px; }
+.charcreate-field input { width:100%; background:#0b0c10; border:1px solid #2a3040; border-radius:6px; padding:8px 10px; color:var(--text); font-size:13px; }
+.charcreate-field input:focus { outline:none; border-color:var(--accent); }
+.charcreate-field input::placeholder { color:#555; }
+.charcreate-gender { display:flex; gap:8px; }
+.gender-btn { flex:1; padding:8px; font-size:13px; font-weight:600; border-radius:8px; background:#1c2230; border:1px solid #2a3040; color:var(--muted); cursor:pointer; }
+.gender-btn.selected { background:#1a3a2a; border-color:#2b5a3a; color:#6fff9a; }
+.gender-btn:hover { border-color:#3b4560; }
+.charcreate-preview { margin:14px 0; display:flex; justify-content:center; }
+#charcreate-canvas { border:1px solid #252a36; border-radius:8px; background:#0b0c10; image-rendering:pixelated; }
+.btn-charcreate-start { width:100%; padding:10px; font-size:14px; font-weight:700; border-radius:10px; background:linear-gradient(135deg, #1a3a2a 0%, #2b5a3a 100%); border:1px solid #2b5a3a; color:#6fff9a; cursor:pointer; letter-spacing:0.5px; }
+.btn-charcreate-start:hover { border-color:#6fff9a; background:linear-gradient(135deg, #2b5a3a 0%, #3a7a4a 100%); }
+
 /* --- Minigame overlay --- */
 .minigame-overlay { position:fixed; inset:0; z-index:100; background:rgba(0,0,0,0.85); display:flex; align-items:center; justify-content:center; }
 .minigame-container { background:var(--panel); border:2px solid var(--accent); border-radius:14px; padding:16px; max-width:460px; width:100%; }

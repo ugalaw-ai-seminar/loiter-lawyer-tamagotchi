@@ -206,6 +206,29 @@
       </section>
     </main>
 
+    <!-- Character creation overlay -->
+    <div id="charcreate-overlay" class="charcreate-overlay" style="display:none">
+      <div class="charcreate-container">
+        <div class="charcreate-title">New Associate</div>
+        <div class="charcreate-sub">Welcome to Lyle Cheatem & Steele, Detroit.</div>
+        <div class="charcreate-field">
+          <label for="input-lawyer-name">Name</label>
+          <input type="text" id="input-lawyer-name" maxlength="24" placeholder="Enter your name" spellcheck="false" />
+        </div>
+        <div class="charcreate-field">
+          <label>Gender</label>
+          <div class="charcreate-gender">
+            <button id="btn-gender-male" class="gender-btn selected" data-gender="male">Male</button>
+            <button id="btn-gender-female" class="gender-btn" data-gender="female">Female</button>
+          </div>
+        </div>
+        <div class="charcreate-preview">
+          <canvas id="charcreate-canvas" width="120" height="100"></canvas>
+        </div>
+        <button id="btn-charcreate-start" class="btn-charcreate-start">Start Career</button>
+      </div>
+    </div>
+
     <!-- Minigame overlay -->
     <div id="minigame-overlay" class="minigame-overlay" style="display:none">
       <div class="minigame-container">
