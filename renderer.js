@@ -1286,13 +1286,216 @@ function rankIndex() {
   return idx;
 }
 
-// --- Midlevel: Junior Management ---
+// --- Midlevel: Junior Management (Mentorship System) ---
 
-const JUNIOR_NAMES = [
-  "Alex Chen", "Jordan Miles", "Priya Patel", "Sam Okafor",
-  "Taylor Webb", "Morgan Reyes", "Casey Kim", "Drew Novak",
-  "Riley Foster", "Quinn Barrett", "Jamie Liu", "Avery Stone"
+// --- Jewish holiday helper (approximate dates for major observances) ---
+function isJewishHoliday(ts) {
+  // Approximate Gregorian dates for major Jewish holidays.
+  // These shift ~11 days/year so we use a lookup for 2024-2028.
+  const d = new Date(ts);
+  const y = d.getFullYear();
+  const m = d.getMonth() + 1; // 1-indexed
+  const day = d.getDate();
+  const md = m * 100 + day; // e.g. 925 = Sep 25
+
+  // Major holidays (Rosh Hashanah, Yom Kippur, Sukkot, Passover, Shavuot)
+  const holidays = {
+    2024: [1003,1004,1012,1017,1018,1019,1020,1021,1022,1023, 423,424,425,426,427,428,429,430, 612,613],
+    2025: [923,924,1002,1007,1008,1009,1010,1011,1012,1013, 413,414,415,416,417,418,419,420, 602,603],
+    2026: [912,913,921,926,927,928,929,930,1001,1002, 402,403,404,405,406,407,408,409, 522,523],
+    2027: [1002,1003,1011,1016,1017,1018,1019,1020,1021,1022, 422,423,424,425,426,427,428,429, 611,612],
+    2028: [921,922,930,1005,1006,1007,1008,1009,1010,1011, 411,412,413,414,415,416,417,418, 531,601]
+  };
+  const yearHolidays = holidays[y] || holidays[2026]; // fallback
+  return yearHolidays.includes(md);
+}
+
+function isSaturday(ts) { return new Date(ts).getDay() === 6; }
+
+// Each junior has unique personality traits that affect their work
+const JUNIOR_PROFILES = [
+  {
+    name: "Dennis Ronaldo",
+    desc: "Nontraditional student. Older, methodical. Good work product but writes in an old-fashioned style. Slow and steady.",
+    tag: "Old School",
+    tagColor: "#c9a27a",
+    // Speed: slow (0.40-0.55), Quality: high but style may bother some clients
+    baseSpeed: () => 0.40 + Math.random() * 0.15,
+    qualityBase: 0.85,
+    // Old-style drafting: 30% chance client cares → quality penalty
+    qualityMod: () => Math.random() < 0.30 ? -0.20 : 0,
+    available: () => true, // always available
+    flavorAssign: "Dennis nods slowly. 'I'll get it done right.' He means it.",
+    flavorDone: (q) => q > 0.7
+      ? "Dennis delivered. Solid work — if a bit formal. The 'whereas' count is… high."
+      : "Dennis delivered, but the partner flagged the 'old-school drafting.' Some clients prefer modern style.",
+    flavorMiss: "Dennis sighed. 'I needed more time.' He looks genuinely disappointed in himself.",
+    quirk: null
+  },
+  {
+    name: "Keith Harrison",
+    desc: "Harvard legacy. Dad's a donor. Fast worker, mediocre product. Oral advocacy is outstanding, though.",
+    tag: "Blueblood",
+    tagColor: "#a5c4ff",
+    // Speed: fast (0.85-1.05), Quality: low baseline
+    baseSpeed: () => 0.85 + Math.random() * 0.20,
+    qualityBase: 0.45,
+    // Lit tasks get a boost (oral advocacy shines in litigation)
+    qualityMod: (j) => j.kind === "lit" ? 0.25 : 0,
+    available: () => true,
+    flavorAssign: "Keith shoots finger guns. 'On it, chief.' He's already walking away.",
+    flavorDone: (q) => q > 0.7
+      ? "Keith turned it in fast. The brief is rough around the edges, but his oral argument notes are brilliant."
+      : "Keith's draft arrived quickly. It's… not great. Multiple typos. But his court presence notes are gold.",
+    flavorMiss: "Keith shrugged. 'My bad.' His dad will probably call someone about it.",
+    quirk: null
+  },
+  {
+    name: "Catherine Janowicz",
+    desc: "Excellent at everything. Fast, thorough, reliable. Observes Shabbat and Jewish holidays — no Saturday work.",
+    tag: "Overachiever",
+    tagColor: "#6fff9a",
+    // Speed: fast (0.75-0.90), Quality: excellent
+    baseSpeed: () => 0.75 + Math.random() * 0.15,
+    qualityBase: 0.92,
+    qualityMod: () => 0,
+    // No work on Saturdays or Jewish holidays
+    available: (ts) => !isSaturday(ts) && !isJewishHoliday(ts),
+    flavorAssign: "Catherine checks her calendar, nods. 'I'll have it to you ahead of schedule.'",
+    flavorDone: (q) => "Catherine's work is impeccable. Clean formatting, thorough analysis, zero typos. As always.",
+    flavorMiss: "Catherine looks mortified. This almost never happens. 'The holiday schedule conflicted. I'm sorry.'",
+    quirk: "shabbat" // tickJuniors checks this
+  },
+  {
+    name: "Benjamin Slater",
+    desc: "Workaholic. Medium speed, excellent quality. Works all day, every day. His personal life is suffering.",
+    tag: "Workaholic",
+    tagColor: "#f2d98a",
+    // Speed: medium (0.60-0.75), Quality: very good
+    baseSpeed: () => 0.60 + Math.random() * 0.15,
+    qualityBase: 0.88,
+    qualityMod: () => 0,
+    available: () => true, // works every day, including weekends
+    flavorAssign: "Benjamin was already at his desk. At 11 PM. 'Sure, add it to the pile.'",
+    flavorDone: (q) => "Benjamin's work is thorough and clean. He sent it at 3 AM. You're not sure he's slept this week.",
+    flavorMiss: "Benjamin looks haunted. He was so close. He's still at his desk, staring at the screen.",
+    quirk: "workaholic"
+  },
+  {
+    name: "Susie Heath",
+    desc: "Stunning. Always eager to take assignments. Work product is unpredictable — sometimes great, sometimes rough.",
+    tag: "Eager",
+    tagColor: "#ff6fb3",
+    // Speed: medium (0.60-0.75), Quality: wild variance
+    baseSpeed: () => 0.60 + Math.random() * 0.15,
+    qualityBase: 0.60,
+    // Hit or miss: ±25% quality swing
+    qualityMod: () => (Math.random() - 0.5) * 0.50,
+    available: () => true,
+    flavorAssign: "Susie beams. 'Absolutely! I'll get right on it!' She means it every time.",
+    flavorDone: (q) => q > 0.7
+      ? "Susie nailed it. When she's on, she's really on. The partner is impressed."
+      : "Susie tried hard, but the work needs revisions. She's already asking for the next assignment, though.",
+    flavorMiss: "Susie's face falls. 'I got pulled in too many directions.' She'll volunteer for something new within the hour.",
+    quirk: null
+  },
+  {
+    name: "Walter Carpenter",
+    desc: "Spacey but enthusiastic about IP work. Starts strong, but quality degrades the more you use him without a break.",
+    tag: "IP Nerd",
+    tagColor: "#cfa5ff",
+    // Speed: medium (0.55-0.70), Quality: starts high, degrades with consecutive use
+    baseSpeed: () => 0.55 + Math.random() * 0.15,
+    qualityBase: 0.82,
+    // Quality degrades with consecutive tasks: -0.10 per recent task
+    qualityMod: (j) => {
+      const recentWalterTasks = (j._tasksCompleted || 0);
+      return -(recentWalterTasks * 0.12);
+    },
+    available: () => true,
+    flavorAssign: "Walter perks up. 'Is this IP-related? Please say yes.' (It doesn't matter — he'll do it either way.)",
+    flavorDone: (q) => q > 0.7
+      ? "Walter's work is sharp — especially the IP analysis sections. He's in his element."
+      : "Walter's focus is slipping. The work has errors he wouldn't have made last week. He might need a break.",
+    flavorMiss: "Walter stares out the window. 'I think I left my apartment unlocked three days ago.'",
+    quirk: "degrades" // quality degrades with back-to-back use
+  },
+  {
+    name: "Margaret Delano",
+    desc: "Top-notch on employment matters. Oddball personality. Works in intense bursts, then completely zones out.",
+    tag: "Burst Worker",
+    tagColor: "#ff9a6f",
+    // Speed: wildly variable — fast bursts then slacking
+    baseSpeed: () => Math.random() < 0.4 ? (0.90 + Math.random() * 0.3) : (0.15 + Math.random() * 0.10),
+    qualityBase: 0.78,
+    // Employment/reg tasks get a quality bonus
+    qualityMod: (j) => j.kind === "reg" ? 0.15 : 0,
+    available: () => true,
+    flavorAssign: "Margaret raises an eyebrow. 'Fine. But I work best between 2 and 4 AM.' She's not joking.",
+    flavorDone: (q) => q > 0.7
+      ? "Margaret's employment analysis is razor-sharp. The rest of the memo is… colorfully worded."
+      : "Margaret's work is uneven. The good parts are very good. The rest reads like it was written during a fever dream.",
+    flavorMiss: "Margaret shrugs. 'I had a burst at 3 AM and then lost the thread entirely. It happens.'",
+    quirk: "burst"
+  },
+  {
+    name: "Sarah Earnheart",
+    desc: "The most balanced junior. Good work, reasonable speed, consistent. No drama. A rock.",
+    tag: "Steady",
+    tagColor: "#6fb3ff",
+    // Speed: solid (0.60-0.75), Quality: reliably good
+    baseSpeed: () => 0.60 + Math.random() * 0.15,
+    qualityBase: 0.80,
+    qualityMod: () => 0,
+    available: () => true,
+    flavorAssign: "Sarah takes the file. 'I'll have it done on time.' No fanfare. Just competence.",
+    flavorDone: (q) => "Sarah delivered on time, as always. Clean, professional, no surprises. She's the standard everyone else is measured against.",
+    flavorMiss: "Sarah winces. 'That's on me. Won't happen again.' You believe her.",
+    quirk: null
+  },
+  {
+    name: "Carter Melancon",
+    desc: "Inferiority complex (especially around Benjamin). Workaholic. Slow start, but later work product shines. Burnout risk.",
+    tag: "Late Bloomer",
+    tagColor: "#a9b0bb",
+    // Speed: slow (0.40-0.55), Quality: improves with tasks completed
+    baseSpeed: () => 0.40 + Math.random() * 0.15,
+    qualityBase: 0.55,
+    // Quality improves with experience — each completed task adds +0.08
+    qualityMod: (j) => {
+      const carterTasks = (j._tasksCompleted || 0);
+      return Math.min(0.35, carterTasks * 0.08);
+    },
+    available: () => true, // workaholic — always available
+    flavorAssign: (j) => {
+      const benActive = state.juniors.some(x => x.profileName === "Benjamin Slater" && x.assigned && !x.completed);
+      return benActive
+        ? "Carter glances at Benjamin's office. 'I'll get this done. Faster than him.' (He won't.)"
+        : "Carter takes the file with a determined nod. 'I'll prove myself on this one.'";
+    },
+    flavorDone: (q) => q > 0.7
+      ? "Carter's work is excellent. He's been improving steadily. The late nights are paying off — for the firm, at least."
+      : "Carter's work is rough, but you can see the effort. He's getting better. He just needs more reps.",
+    flavorMiss: "Carter slumps at his desk. He's been here since yesterday. The burnout is real.",
+    quirk: "latebloomer" // quality improves with use, but burnout risk
+  }
 ];
+
+// Track per-junior persistent state across assignments (survives within a run)
+// Keys: profile name → { tasksCompleted, lastAssignedAt, burnedOut, burnoutUntil }
+function getJuniorMeta(name) {
+  if (!state.juniorMeta) state.juniorMeta = {};
+  if (!state.juniorMeta[name]) {
+    state.juniorMeta[name] = { tasksCompleted: 0, lastAssignedAt: 0, burnedOut: false, burnoutUntil: 0 };
+  }
+  return state.juniorMeta[name];
+}
+
+const JUNIOR_TASK_NAMES = {
+  lit: ["Draft discovery requests", "Research case law", "Prepare witness outline", "Index exhibits", "Draft motion to compel", "Prepare deposition summary"],
+  corp: ["Organize data room", "Draft ancillary docs", "Review disclosure schedules", "Compile signature pages", "Redline merger agreement", "Draft board resolutions"],
+  reg: ["Pull agency filings", "Summarize comment letters", "Update compliance tracker", "Draft FOIA request", "Review consent order", "Prepare regulatory memo"]
+};
 
 function spawnJunior() {
   const kinds = ["lit", "corp", "reg"];
@@ -1300,16 +1503,33 @@ function spawnJunior() {
   const billableHours = randInt(2, 8);
   const points = billableHours * randInt(12, 20);
   const deadlineHours = randInt(24, 120);
-  const names = {
-    lit: ["Draft discovery requests", "Research case law", "Prepare witness outline", "Index exhibits"],
-    corp: ["Organize data room", "Draft ancillary docs", "Review disclosure schedules", "Compile signature pages"],
-    reg: ["Pull agency filings", "Summarize comment letters", "Update compliance tracker", "Draft FOIA request"]
-  };
+
+  // Pick a profile not already active as a junior
+  const activeNames = state.juniors.map(j => j.profileName);
+  const available = JUNIOR_PROFILES.filter(p => !activeNames.includes(p.name));
+  // Also filter out burned-out juniors
+  const notBurnedOut = available.filter(p => {
+    const meta = getJuniorMeta(p.name);
+    return !meta.burnedOut || now() >= meta.burnoutUntil;
+  });
+
+  const pool = notBurnedOut.length > 0 ? notBurnedOut : available;
+  if (pool.length === 0) return null;
+
+  const profile = randChoice(pool);
+  const meta = getJuniorMeta(profile.name);
+
+  // Clear burnout if expired
+  if (meta.burnedOut && now() >= meta.burnoutUntil) {
+    meta.burnedOut = false;
+    meta.burnoutUntil = 0;
+  }
 
   return {
     id: Math.random().toString(36).slice(2),
-    name: randChoice(JUNIOR_NAMES.filter(n => !state.juniors.some(j => j.name === n))) || randChoice(JUNIOR_NAMES),
-    task: randChoice(names[kind]),
+    name: profile.name,
+    profileName: profile.name,
+    task: randChoice(JUNIOR_TASK_NAMES[kind]),
     kind,
     billableHours,
     billablesEarned: 0,
@@ -1319,7 +1539,9 @@ function spawnJunior() {
     progress: 0,
     completed: false,
     missed: false,
-    assigned: false  // Player hasn't delegated work yet
+    assigned: false,
+    _tasksCompleted: meta.tasksCompleted, // snapshot for quality calc
+    _quality: null // calculated on completion
   };
 }
 
@@ -1328,7 +1550,13 @@ function assignJunior(juniorId) {
   if (!j || j.assigned) return;
   j.assigned = true;
   j.assignedAt = now();
-  log(`Delegated "${j.task}" to ${j.name}. They're on it.`);
+  const profile = JUNIOR_PROFILES.find(p => p.name === j.profileName);
+  if (profile) {
+    const msg = typeof profile.flavorAssign === "function" ? profile.flavorAssign(j) : profile.flavorAssign;
+    log(`Delegated "${j.task}" to ${j.name}. ${msg}`);
+  } else {
+    log(`Delegated "${j.task}" to ${j.name}. They're on it.`);
+  }
 }
 
 function dismissJunior(juniorId) {
@@ -1345,9 +1573,14 @@ function tickJuniors(dtHours) {
   // Spawn juniors periodically (max 3 at a time)
   const unfinished = state.juniors.filter(j => !j.completed && !j.missed).length;
   if (now() >= state.nextJuniorSpawnAt && unfinished < 3) {
-    state.juniors.push(spawnJunior());
+    const junior = spawnJunior();
+    if (junior) {
+      state.juniors.push(junior);
+      const profile = JUNIOR_PROFILES.find(p => p.name === junior.profileName);
+      const tagLabel = profile ? profile.tag : "";
+      log(`${junior.name} is available${tagLabel ? ` [${tagLabel}]` : ""}. Awaiting your delegation.`);
+    }
     state.nextJuniorSpawnAt = now() + 1000 * 60 * 60 * randInt(8, 18);
-    log("A junior associate is waiting for your direction.");
   }
   if (state.nextJuniorSpawnAt === 0) {
     state.nextJuniorSpawnAt = now() + 1000 * 60 * 60 * randInt(2, 6);
@@ -1356,8 +1589,14 @@ function tickJuniors(dtHours) {
   for (const j of state.juniors) {
     if (j.completed || j.missed || !j.assigned) continue;
 
-    // Juniors work at ~60-80% speed with some randomness
-    const juniorSpeed = 0.6 + Math.random() * 0.2;
+    const profile = JUNIOR_PROFILES.find(p => p.name === j.profileName);
+    if (!profile) continue;
+
+    // Check availability (Catherine's Shabbat/holiday observance)
+    if (!profile.available(now())) continue; // Skip this tick — not working today
+
+    // Calculate speed from personality
+    const juniorSpeed = profile.baseSpeed();
     const workDone = juniorSpeed * dtHours;
     const remaining = j.billableHours - j.billablesEarned;
     const toAdd = Math.min(remaining, workDone);
@@ -1366,16 +1605,46 @@ function tickJuniors(dtHours) {
 
     if (now() > j.deadlineAt && j.progress < 1 && !j.missed) {
       j.missed = true;
-      // No PIP for the player - just a lost opportunity
-      log(`${j.name} missed the deadline on "${j.task}." No bonus this time.`);
+      log(`${j.name} missed the deadline on "${j.task}." ${profile.flavorMiss}`);
     }
 
     if (j.progress >= 1 && !j.completed) {
       j.completed = true;
-      const bonus = Math.round(j.points * state.breakaway.multiplier);
+
+      // Calculate quality
+      const meta = getJuniorMeta(j.profileName);
+      j._tasksCompleted = meta.tasksCompleted;
+      let quality = profile.qualityBase + profile.qualityMod(j);
+      quality = clamp(quality, 0.15, 1.0);
+      j._quality = quality;
+
+      // Update meta
+      meta.tasksCompleted += 1;
+      meta.lastAssignedAt = now();
+
+      // Quality affects bonus: high quality = full bonus, low = reduced
+      const qualityMult = 0.5 + quality * 0.5; // range: 0.575 to 1.0
+      const bonus = Math.round(j.points * state.breakaway.multiplier * qualityMult);
+      const billableCredit = j.billableHours * (0.2 + quality * 0.15); // 0.275 to 0.35
+
       state.money += bonus;
-      state.billables += j.billableHours * 0.3; // Partial billable credit for delegation
-      log(`${j.name} completed "${j.task}." Delegation bonus: +$${bonus}.`);
+      state.billables += billableCredit;
+
+      const flavorMsg = typeof profile.flavorDone === "function" ? profile.flavorDone(quality) : profile.flavorDone;
+      const qualityLabel = quality >= 0.85 ? "Excellent" : quality >= 0.65 ? "Good" : quality >= 0.45 ? "Fair" : "Rough";
+      log(`${j.name} completed "${j.task}" [${qualityLabel}]. +$${bonus}. ${flavorMsg}`);
+
+      // Carter Melancon: burnout risk after 4+ consecutive tasks
+      if (j.profileName === "Carter Melancon" && meta.tasksCompleted >= 4 && Math.random() < 0.35) {
+        meta.burnedOut = true;
+        meta.burnoutUntil = now() + 1000 * 60 * 60 * randInt(24, 72);
+        log("Carter Melancon is burned out. He needs a few days before he's back. Someone check on him.");
+      }
+
+      // Walter Carpenter: hint quality is degrading
+      if (j.profileName === "Walter Carpenter" && meta.tasksCompleted >= 3 && quality < 0.6) {
+        log("Walter seems distracted lately. His work quality is slipping. Consider giving him a break.");
+      }
     }
   }
 
@@ -2737,6 +3006,13 @@ function renderJuniors() {
     card.className = "junior-card";
     const pct = Math.round(j.progress * 100);
     const dl = new Date(j.deadlineAt).toLocaleString();
+
+    const profile = JUNIOR_PROFILES.find(p => p.name === j.profileName);
+    const tagLabel = profile ? profile.tag : "";
+    const tagColor = profile ? profile.tagColor : "#6fb3ff";
+    const profileDesc = profile ? profile.desc : "";
+    const meta = getJuniorMeta(j.profileName);
+
     const statusTag = j.completed
       ? ' <span class="tag tag-done">Done</span>'
       : j.missed
@@ -2745,9 +3021,24 @@ function renderJuniors() {
           ? ' <span class="tag" style="background:#1a2a3a;color:#6fb3ff;border:1px solid #2b4a6a">Awaiting</span>'
           : "";
 
+    const personalityTag = tagLabel
+      ? ` <span class="tag" style="background:transparent;color:${tagColor};border:1px solid ${tagColor}">${tagLabel}</span>`
+      : "";
+
+    const qualityLabel = j._quality != null
+      ? (j._quality >= 0.85 ? '<span style="color:#6fff9a">Excellent</span>'
+        : j._quality >= 0.65 ? '<span style="color:#6fb3ff">Good</span>'
+        : j._quality >= 0.45 ? '<span style="color:#f2d98a">Fair</span>'
+        : '<span style="color:#ff6f6f">Rough</span>')
+      : "";
+
+    const xpLabel = meta.tasksCompleted > 0
+      ? `<span style="color:var(--muted);font-size:10px">${meta.tasksCompleted} task${meta.tasksCompleted !== 1 ? "s" : ""} done</span>`
+      : "";
+
     card.innerHTML = `
       <div class="junior-top">
-        <div class="junior-name">${j.name}${statusTag}</div>
+        <div class="junior-name">${j.name}${personalityTag}${statusTag}</div>
         ${!j.assigned && !j.completed && !j.missed
           ? `<button class="btn-delegate" data-delegate="${j.id}">Delegate</button>`
           : !j.completed && !j.missed && j.assigned
@@ -2757,9 +3048,13 @@ function renderJuniors() {
               : ""
         }
       </div>
-      <div class="junior-task">${j.task} (${j.kind.toUpperCase()})</div>
+      ${!j.assigned && !j.completed && !j.missed
+        ? `<div class="junior-desc" style="color:var(--muted);font-size:10px;margin:2px 0 4px;line-height:1.3">${profileDesc}</div>`
+        : ""
+      }
+      <div class="junior-task">${j.task} (${j.kind.toUpperCase()})${qualityLabel ? " — " + qualityLabel : ""}</div>
       <div class="junior-meta">
-        <span>${j.billableHours}h • +$${j.points} bonus</span>
+        <span>${j.billableHours}h • +$${j.points} bonus ${xpLabel}</span>
         <span>Due: ${dl}</span>
       </div>
       ${j.assigned && !j.completed && !j.missed
@@ -4096,6 +4391,13 @@ function init() {
 
   // Migrate old saves that lack arc fields
   if (!state.juniors) state.juniors = [];
+  if (!state.juniorMeta) state.juniorMeta = {};
+  // Migrate old juniors that lack profileName
+  for (const j of state.juniors) {
+    if (!j.profileName) j.profileName = j.name;
+    if (j._tasksCompleted === undefined) j._tasksCompleted = 0;
+    if (j._quality === undefined) j._quality = null;
+  }
   if (!state.nextJuniorSpawnAt) state.nextJuniorSpawnAt = 0;
   if (!state.rival) state.rival = { name: "", score: 0, playerScore: 0, momentum: 0, lastTrashTalkAt: 0, active: false, pitchOffTriggered: false, resolved: false, resolvedAt: 0 };
   if (state.rival.pitchOffTriggered === undefined) state.rival.pitchOffTriggered = false;
