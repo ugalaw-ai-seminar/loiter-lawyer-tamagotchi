@@ -197,6 +197,20 @@ button:disabled { opacity:0.45; cursor:not-allowed; }
 .btn-charcreate-start { width:100%; padding:10px; font-size:14px; font-weight:700; border-radius:10px; background:linear-gradient(135deg, #1a3a2a 0%, #2b5a3a 100%); border:1px solid #2b5a3a; color:#6fff9a; cursor:pointer; letter-spacing:0.5px; }
 .btn-charcreate-start:hover { border-color:#6fff9a; background:linear-gradient(135deg, #2b5a3a 0%, #3a7a4a 100%); }
 
+/* --- Specialization overlay --- */
+.spec-options { display:flex; flex-direction:column; gap:10px; margin-top:14px; }
+.spec-btn { background:#0b0c10; border:1px solid #2a3040; border-radius:10px; padding:14px 16px; text-align:left; cursor:pointer; transition:border-color 0.15s, background 0.15s; }
+.spec-btn:hover { border-color:var(--accent); background:#151820; }
+.spec-btn-title { font-weight:800; font-size:15px; color:var(--text); margin-bottom:3px; }
+.spec-btn-desc { font-size:12px; color:var(--muted); margin-bottom:6px; line-height:1.4; }
+.spec-btn-bonus { font-size:11px; color:var(--accent); letter-spacing:0.3px; }
+.spec-btn[data-spec="lit"] .spec-btn-title { color:#ff6f6f; }
+.spec-btn[data-spec="corp"] .spec-btn-title { color:#6fb3ff; }
+.spec-btn[data-spec="reg"] .spec-btn-title { color:#f2d98a; }
+.spec-btn[data-spec="lit"]:hover { border-color:#ff6f6f; }
+.spec-btn[data-spec="corp"]:hover { border-color:#6fb3ff; }
+.spec-btn[data-spec="reg"]:hover { border-color:#f2d98a; }
+
 /* --- Minigame overlay --- */
 .minigame-overlay { position:fixed; inset:0; z-index:100; background:rgba(0,0,0,0.85); display:flex; align-items:center; justify-content:center; }
 .minigame-container { background:var(--panel); border:2px solid var(--accent); border-radius:14px; padding:16px; max-width:460px; width:100%; }

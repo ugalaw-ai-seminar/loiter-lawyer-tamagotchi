@@ -244,6 +244,10 @@ const defaultState = () => ({
     lifetimeEarnings: 0    // Total money across all runs (used for multiplier calc)
   },
 
+  // Practice area specialization (chosen early in career)
+  specialization: null,    // null = unchosen, "lit", "corp", or "reg"
+  specChoiceOffered: false, // true once the choice overlay has been shown
+
   // Work/family relationship meter
   relationship: 100,       // 0-100: family relationship health (100=happy, 0=divorced)
   workChoices: 0,          // Consecutive times player chose work over family
@@ -940,7 +944,21 @@ function randInt(a, b) { return Math.floor(a + Math.random() * (b - a + 1)); }
 
 function makeAssignment(opts = {}) {
   const kinds = ["lit", "corp", "reg"];
-  const kind = opts.kind || randChoice(kinds);
+  let kind = opts.kind;
+  if (!kind) {
+    // Weight toward specialization: 60% specialty, 20%/20% others
+    if (state.specialization) {
+      const r = Math.random();
+      if (r < 0.60) {
+        kind = state.specialization;
+      } else {
+        const others = kinds.filter(k => k !== state.specialization);
+        kind = randChoice(others);
+      }
+    } else {
+      kind = randChoice(kinds);
+    }
+  }
 
   const ri = rankIndex();
 
@@ -979,10 +997,29 @@ function makeAssignment(opts = {}) {
     probono: ["Tenant hotline advice", "Expungement clinic prep", "Asylum intake interview", "Name change petition"]
   };
 
+  // Specialty-exclusive assignments (only available when specialized)
+  const specNames = {
+    lit: ["Class action coordination", "Expert witness prep", "Appellate brief", "Jury selection memo", "Trial exhibit binder", "Cross-examination outline"],
+    corp: ["Hostile takeover defense", "IPO roadshow deck", "Shareholder proxy fight", "Venture term sheet", "Golden parachute review", "Antitrust merger filing"],
+    reg: ["SEC enforcement response", "Congressional testimony prep", "Whistleblower investigation", "EPA consent decree", "CFPB exam response", "Banking charter application"]
+  };
+
+  let title;
+  if (state.specialization === kind && specNames[kind] && Math.random() < 0.4) {
+    title = randChoice(specNames[kind]);
+  } else {
+    title = randChoice(names[kind]);
+  }
+
+  // Specialty pay bump: +10% on in-specialty assignments
+  if (state.specialization === kind && kind !== "probono") {
+    points = Math.round(points * 1.10);
+  }
+
   return {
     id: Math.random().toString(36).slice(2),
     kind,
-    title: randChoice(names[kind]),
+    title,
     billableHours,
     billablesEarned: 0,
     points,
@@ -2967,6 +3004,7 @@ function tick(dtMs) {
 
       let repGain = Math.max(4, Math.round(a.billableHours * 1.2));
       if (state.perks.goldenVoice && a.kind === "lit") repGain = Math.round(repGain * 1.25);
+      if (state.specialization && a.kind === state.specialization) repGain = Math.round(repGain * 1.15);
       if (state.lawyer.outfit.tie) repGain += 1;
       if (state.store.leatherBriefcase) repGain = Math.round(repGain * 1.15);
       repGain = Math.round(repGain * state.breakaway.multiplier);
@@ -3156,9 +3194,11 @@ function renderStats() {
   $("rep-corp").textContent = Math.floor(state.reputation.corp);
   $("rep-reg").textContent = Math.floor(state.reputation.reg);
 
+  const specLabels = { lit: "Litigation", corp: "Corporate", reg: "Regulatory" };
+  const specTag = state.specialization ? ` — ${specLabels[state.specialization]}` : "";
   const rankSuffix = state.dismissed ? " — DISMISSED" : (state.breakaway.count > 0 ? ` (Run #${state.breakaway.count + 1})` : "");
   const nameLabel = state.lawyer.name ? `${state.lawyer.name} — ` : "";
-  $("rank").textContent = `${nameLabel}${rankName()}${rankSuffix}`;
+  $("rank").textContent = `${nameLabel}${rankName()}${specTag}${rankSuffix}`;
 }
 
 function renderClock() {
@@ -4859,6 +4899,47 @@ function saveSilent() {
   } catch (_) { /* best effort */ }
 }
 
+// Specialization choice
+let specPending = false; // flag to show overlay on next tick
+
+function checkSpecialization() {
+  if (state.specialization || state.specChoiceOffered) return;
+  // Trigger at 50+ billable hours (roughly 2 weeks of active play)
+  if (state.billables >= 50) {
+    state.specChoiceOffered = true;
+    specPending = true;
+    log("The partners have been reviewing your work. Barbara Kline's assistant left a note on your desk: 'Time to pick a lane.'");
+  }
+}
+
+function showSpecOverlay() {
+  const overlay = $("spec-overlay");
+  overlay.style.display = "flex";
+
+  overlay.querySelectorAll(".spec-btn").forEach(btn => {
+    btn.onclick = () => {
+      const spec = btn.getAttribute("data-spec");
+      state.specialization = spec;
+      overlay.style.display = "none";
+      specPending = false;
+
+      const labels = { lit: "Litigation", corp: "Corporate", reg: "Regulatory" };
+      log(`You chose ${labels[spec]}. The partners nodded. Your assignments will reflect your practice area.`);
+
+      // Immediate perk: small rep bonus in chosen field
+      const bonus = 15;
+      if (spec === "lit") state.reputation.lit += bonus;
+      if (spec === "corp") state.reputation.corp += bonus;
+      if (spec === "reg") state.reputation.reg += bonus;
+
+      // Refresh offers to reflect new weighting
+      refreshOffers();
+      renderAll();
+      save();
+    };
+  });
+}
+
 function init() {
   seedOffers();
   loadStoreCatalog();
@@ -4904,6 +4985,13 @@ function init() {
   if (state.relationship === undefined) state.relationship = state.divorced ? 0 : 100;
   if (state.burnout === undefined) state.burnout = false;
   if (state.burnoutUntil === undefined) state.burnoutUntil = 0;
+
+  // Specialization migration
+  if (state.specialization === undefined) state.specialization = null;
+  if (state.specChoiceOffered === undefined) {
+    // If existing save has 50+ billables, mark as offered but let them still choose
+    state.specChoiceOffered = false;
+  }
 
   // NPC arc migration
   if (!state.npcArcs) {
@@ -4983,6 +5071,13 @@ function init() {
     tick(capped);
 
     renderAll();
+
+    // Check specialization trigger
+    checkSpecialization();
+    if (specPending && !minigameActive) {
+      showSpecOverlay();
+      specPending = false;
+    }
 
     // Show minigame prompt if one is pending
     if (pendingMinigame && !minigameActive) {
