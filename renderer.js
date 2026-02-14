@@ -244,6 +244,9 @@ const defaultState = () => ({
     lifetimeEarnings: 0    // Total money across all runs (used for multiplier calc)
   },
 
+  // Tutorial
+  tutorialComplete: false,  // true after Patricia's tour is done
+
   // Practice area specialization (chosen early in career)
   specialization: null,    // null = unchosen, "lit", "corp", or "reg"
   specChoiceOffered: false, // true once the choice overlay has been shown
@@ -4899,6 +4902,126 @@ function saveSilent() {
   } catch (_) { /* best effort */ }
 }
 
+// ---------- Tutorial (Patricia from HR) ----------
+
+const TUTORIAL_STEPS = [
+  {
+    text: `Welcome to <strong>Lyle Cheatem & Steele</strong>! I'm Patricia from HR. I'll be giving you the tour today.<br><br>This won't take long — I know you're eager to start billing.`,
+    highlight: null,
+    btn: "Let's go"
+  },
+  {
+    text: `This is <strong>you</strong>. Our newest junior associate. Try not to look so nervous — the partners can smell fear.<br><br>Your office comes with a desk, a dying plant, and a window that hasn't been cleaned since the Clinton administration.`,
+    highlight: "scene",
+    btn: "Next"
+  },
+  {
+    text: `These are your <strong>vitals</strong>. Think of them as your basic human needs — the ones this firm will systematically erode.<br><br><strong>Hunger</strong> and <strong>Caffeine</strong> drop over time. <strong>Sleep</strong> depletes as you work. <strong>Stress</strong> rises with your caseload.<br><br>If any of these bottom out, your productivity tanks. Keep them in the green.`,
+    highlight: "stats",
+    btn: "Next"
+  },
+  {
+    text: `That <em>Family</em> bar? That's your relationship with the people who used to see you at dinner.<br><br>Every time you choose work over family, it drops. If it hits zero... well, let's just say the firm's divorce attorneys are <em>very</em> experienced. They handle a lot of internal referrals.`,
+    highlight: "stats",
+    btn: "Noted"
+  },
+  {
+    text: `These are your <strong>actions</strong>. Use them to take care of yourself between assignments.<br><br><strong>Order Takeout</strong> fills your hunger. <strong>Refill Coffee</strong> boosts caffeine. <strong>Power Nap</strong> restores sleep (the partners frown on this, but what they don't know won't hurt them).<br><br>The rest are... creature comforts. You'll figure them out.`,
+    highlight: "actions",
+    btn: "Next"
+  },
+  {
+    text: `Over here is where the real work happens. <strong>Assignment Offers</strong> appear every few hours — three at a time.<br><br>Each one shows the type (<em>Litigation</em>, <em>Corporate</em>, or <em>Regulatory</em>), the billable hours, pay, and deadline. Accept the ones you can handle. Decline the ones you can't — but declining costs reputation.<br><br>Don't miss deadlines. HR tracks that.`,
+    highlight: "offers",
+    btn: "Next"
+  },
+  {
+    text: `Accepted assignments go into your <strong>Active Queue</strong>. They complete automatically as time passes — your productivity determines how fast.<br><br>Keep your stats healthy and your stress low for maximum productivity. Burned-out associates bill at a fraction of the rate.`,
+    highlight: "queue",
+    btn: "Next"
+  },
+  {
+    text: `Down here is the <strong>Log</strong>. Everything that happens — events, NPC encounters, completed assignments, life choices — shows up here.<br><br>Read it. It's the story of your career. For better or worse.`,
+    highlight: "log",
+    btn: "Next"
+  },
+  {
+    text: `One more thing: the <strong>Company Store</strong>. As you earn money, you can buy upgrades — a mini-fridge, a better coffee maker, fancy office items.<br><br>Some are practical. Some are vanity purchases. Just like real BigLaw.`,
+    highlight: "store-items",
+    btn: "Next"
+  },
+  {
+    text: `That's the tour. A few final tips from someone who's seen a lot of associates come and go:<br><br>&#8226; <strong>Accept assignments you can finish on time.</strong> Missed deadlines get PIP strikes. Three strikes and you're out.<br>&#8226; <strong>Don't neglect your family.</strong> The meter is harder to rebuild than it is to maintain.<br>&#8226; <strong>People will stop by your office.</strong> Talk to them. They're the only human connection you'll have some days.<br>&#8226; After a few weeks, <strong>the partners will ask you to specialize</strong>. Choose wisely — it shapes your entire career.`,
+    highlight: null,
+    btn: "Next"
+  },
+  {
+    text: `Alright, that's everything. Your first assignment offers are on your desk.<br><br>Good luck out there. And remember: <em>the firm comes first</em>.<br><br>...I'm contractually required to say that. Between us? Take care of yourself. This place will eat you alive if you let it.`,
+    highlight: null,
+    btn: "Start Career"
+  }
+];
+
+let tutorialActive = false;
+let tutorialStepIdx = 0;
+let currentHighlightEl = null;
+
+function startTutorial() {
+  tutorialActive = true;
+  tutorialStepIdx = 0;
+  const overlay = $("tutorial-overlay");
+  overlay.style.display = "";
+
+  $("btn-tutorial-next").onclick = advanceTutorial;
+  showTutorialStep();
+}
+
+function showTutorialStep() {
+  const step = TUTORIAL_STEPS[tutorialStepIdx];
+  $("tutorial-text").innerHTML = step.text;
+  $("btn-tutorial-next").textContent = step.btn;
+  $("tutorial-step-label").textContent = `${tutorialStepIdx + 1} / ${TUTORIAL_STEPS.length}`;
+
+  // Remove previous highlight
+  if (currentHighlightEl) {
+    currentHighlightEl.classList.remove("tutorial-highlight");
+    currentHighlightEl = null;
+  }
+
+  // Add new highlight
+  if (step.highlight) {
+    const el = document.getElementById(step.highlight);
+    if (el) {
+      el.classList.add("tutorial-highlight");
+      currentHighlightEl = el;
+      // Scroll element into view if needed
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }
+}
+
+function advanceTutorial() {
+  tutorialStepIdx++;
+  if (tutorialStepIdx >= TUTORIAL_STEPS.length) {
+    endTutorial();
+    return;
+  }
+  showTutorialStep();
+}
+
+function endTutorial() {
+  tutorialActive = false;
+  $("tutorial-overlay").style.display = "none";
+
+  if (currentHighlightEl) {
+    currentHighlightEl.classList.remove("tutorial-highlight");
+    currentHighlightEl = null;
+  }
+
+  state.tutorialComplete = true;
+  save();
+}
+
 // Specialization choice
 let specPending = false; // flag to show overlay on next tick
 
@@ -4986,6 +5109,9 @@ function init() {
   if (state.burnout === undefined) state.burnout = false;
   if (state.burnoutUntil === undefined) state.burnoutUntil = 0;
 
+  // Tutorial migration (existing saves skip the tutorial)
+  if (state.tutorialComplete === undefined) state.tutorialComplete = true;
+
   // Specialization migration
   if (state.specialization === undefined) state.specialization = null;
   if (state.specChoiceOffered === undefined) {
@@ -5043,6 +5169,8 @@ function init() {
       seedOffers(true);
       log(`Welcome to Lyle Cheatem & Steele, ${lawyerName()}. Don't get comfortable.`);
       renderAll();
+      // Start HR tutorial after character creation
+      startTutorial();
     });
   }
 
@@ -5061,7 +5189,7 @@ function init() {
   renderAll();
 
   setInterval(() => {
-    if (minigameActive) return; // Pause main sim during minigames
+    if (minigameActive || tutorialActive) return; // Pause during minigames and tutorial
 
     const t = now();
     const dt = t - state.lastTick;
