@@ -17,6 +17,7 @@ h3 { margin:14px 0 8px; font-size:14px; color: var(--muted); }
 .bar { height:10px; border:1px solid #2a3040; border-radius:999px; overflow:hidden; background:#0b0c10; }
 .fill { height:100%; width:50%; background: var(--accent); }
 .fill.bad { background:#ff6f6f; }
+.fill.rel { background:#ff6fb3; }
 .val { text-align:right; color: var(--text); font-variant-numeric: tabular-nums; }
 
 .actions .grid { display:grid; grid-template-columns: 1fr 1fr; gap:8px; }
@@ -47,6 +48,8 @@ button:disabled { opacity:0.45; cursor:not-allowed; }
 
 .btn-clear { font-size:11px; padding:3px 8px; background:#1c2230; border:1px solid #3b4560; color:var(--muted); cursor:pointer; border-radius:6px; }
 .btn-clear:hover { border-color:var(--accent); color:var(--text); }
+.btn-decline { font-size:11px; padding:6px 10px; background:#1a1520; border:1px solid #3a2a2a; color:#a97070; cursor:pointer; border-radius:10px; }
+.btn-decline:hover { border-color:#ff6f6f; color:#ff6f6f; }
 
 .store-header { display:flex; justify-content:space-between; align-items:center; }
 .store-header h2 { margin:0 0 10px; }
@@ -165,6 +168,48 @@ button:disabled { opacity:0.45; cursor:not-allowed; }
 .api-status.connected { color:#6fff9a; }
 .api-status.error { color:#ff6f6f; }
 .api-status.disconnected { color: var(--muted); }
+
+/* --- Cutscene overlay --- */
+.cutscene-overlay { position:fixed; inset:0; z-index:120; background:#000; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+#cutscene-canvas { border:none; border-radius:0; background:#000; image-rendering:pixelated; display:block; }
+.cutscene-text { color:#d9dbe6; font-size:16px; text-align:center; max-width:440px; line-height:1.6; margin-top:18px; opacity:0; transition:opacity 2s ease; }
+.cutscene-text.visible { opacity:1; }
+.btn-cutscene-close { margin-top:20px; padding:10px 32px; font-size:14px; font-weight:600; border-radius:10px; background:transparent; border:1px solid #2a3040; color:#a9b0bb; cursor:pointer; opacity:0; transition:opacity 1.5s ease; }
+.btn-cutscene-close.visible { opacity:1; }
+.btn-cutscene-close:hover { border-color:#6fb3ff; color:#e8e8e8; }
+
+/* --- Character creation overlay --- */
+.charcreate-overlay { position:fixed; inset:0; z-index:110; background:rgba(0,0,0,0.92); display:flex; align-items:center; justify-content:center; }
+.charcreate-container { background:var(--panel); border:2px solid var(--accent); border-radius:14px; padding:24px; max-width:340px; width:100%; text-align:center; }
+.charcreate-title { font-weight:800; font-size:18px; color:var(--text); margin-bottom:4px; }
+.charcreate-sub { font-size:12px; color:var(--muted); margin-bottom:18px; }
+.charcreate-field { text-align:left; margin-bottom:14px; }
+.charcreate-field label { display:block; color:var(--muted); font-size:11px; margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px; }
+.charcreate-field input { width:100%; background:#0b0c10; border:1px solid #2a3040; border-radius:6px; padding:8px 10px; color:var(--text); font-size:13px; }
+.charcreate-field input:focus { outline:none; border-color:var(--accent); }
+.charcreate-field input::placeholder { color:#555; }
+.charcreate-gender { display:flex; gap:8px; }
+.gender-btn { flex:1; padding:8px; font-size:13px; font-weight:600; border-radius:8px; background:#1c2230; border:1px solid #2a3040; color:var(--muted); cursor:pointer; }
+.gender-btn.selected { background:#1a3a2a; border-color:#2b5a3a; color:#6fff9a; }
+.gender-btn:hover { border-color:#3b4560; }
+.charcreate-preview { margin:14px 0; display:flex; justify-content:center; }
+#charcreate-canvas { border:1px solid #252a36; border-radius:8px; background:#0b0c10; image-rendering:pixelated; }
+.btn-charcreate-start { width:100%; padding:10px; font-size:14px; font-weight:700; border-radius:10px; background:linear-gradient(135deg, #1a3a2a 0%, #2b5a3a 100%); border:1px solid #2b5a3a; color:#6fff9a; cursor:pointer; letter-spacing:0.5px; }
+.btn-charcreate-start:hover { border-color:#6fff9a; background:linear-gradient(135deg, #2b5a3a 0%, #3a7a4a 100%); }
+
+/* --- Specialization overlay --- */
+.spec-options { display:flex; flex-direction:column; gap:10px; margin-top:14px; }
+.spec-btn { background:#0b0c10; border:1px solid #2a3040; border-radius:10px; padding:14px 16px; text-align:left; cursor:pointer; transition:border-color 0.15s, background 0.15s; }
+.spec-btn:hover { border-color:var(--accent); background:#151820; }
+.spec-btn-title { font-weight:800; font-size:15px; color:var(--text); margin-bottom:3px; }
+.spec-btn-desc { font-size:12px; color:var(--muted); margin-bottom:6px; line-height:1.4; }
+.spec-btn-bonus { font-size:11px; color:var(--accent); letter-spacing:0.3px; }
+.spec-btn[data-spec="lit"] .spec-btn-title { color:#ff6f6f; }
+.spec-btn[data-spec="corp"] .spec-btn-title { color:#6fb3ff; }
+.spec-btn[data-spec="reg"] .spec-btn-title { color:#f2d98a; }
+.spec-btn[data-spec="lit"]:hover { border-color:#ff6f6f; }
+.spec-btn[data-spec="corp"]:hover { border-color:#6fb3ff; }
+.spec-btn[data-spec="reg"]:hover { border-color:#f2d98a; }
 
 /* --- Minigame overlay --- */
 .minigame-overlay { position:fixed; inset:0; z-index:100; background:rgba(0,0,0,0.85); display:flex; align-items:center; justify-content:center; }

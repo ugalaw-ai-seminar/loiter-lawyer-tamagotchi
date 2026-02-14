@@ -63,6 +63,95 @@ const BUILTIN_ITEMS = [
     cost: 900,
     category: "upgrade",
     effect: { target: "store.desk", value: true }
+  },
+  {
+    id: "designerWatch",
+    name: "Designer Watch",
+    description: "A Rolex Submariner. +5% productivity. Impresses absolutely nobody at the firm.",
+    cost: 1200,
+    category: "cosmetic",
+    effect: { target: "store.designerWatch", value: true }
+  },
+  {
+    id: "golfClubs",
+    name: "Golf Clubs",
+    description: "Titleist AP2 irons. Passive stress decay +15%. For 'networking,' obviously.",
+    cost: 1500,
+    category: "upgrade",
+    effect: { target: "store.golfClubs", value: true }
+  },
+  {
+    id: "leatherBriefcase",
+    name: "Leather Briefcase",
+    description: "Italian calfskin. Reputation gains +15%. You look like you bill $800/hr.",
+    cost: 1000,
+    category: "upgrade",
+    effect: { target: "store.leatherBriefcase", value: true }
+  },
+  {
+    id: "espressoMachine",
+    name: "Espresso Machine",
+    description: "La Marzocca Linea Mini. Coffee action gives +30% more caffeine.",
+    cost: 1100,
+    category: "upgrade",
+    effect: { target: "store.espressoMachine", value: true }
+  },
+  {
+    id: "cornerOfficeArt",
+    name: "Corner Office Art",
+    description: "A framed Rothko print. Passive stress rise -10%. It 'speaks to you.'",
+    cost: 750,
+    category: "cosmetic",
+    effect: { target: "store.cornerOfficeArt", value: true }
+  },
+  {
+    id: "monogrammedPen",
+    name: "Monogrammed Pen",
+    description: "Montblanc Meisterstück. Billable hour gains +8%. The ink flows like settlements.",
+    cost: 600,
+    category: "upgrade",
+    effect: { target: "store.monogrammedPen", value: true }
+  },
+  // --- Consumable items (repurchasable) ---
+  {
+    id: "energyDrink",
+    name: "Energy Drink",
+    description: "Monster Ultra. +25 caffeine, +10% productivity for 3 hours. Consumable.",
+    cost: 30,
+    category: "consumable",
+    effect: { type: "consumable", action: "energyDrink" }
+  },
+  {
+    id: "therapistSession",
+    name: "Therapist Session",
+    description: "Dr. Feldman, LPC. -20 stress. Eases work-family tension. Consumable.",
+    cost: 200,
+    category: "consumable",
+    effect: { type: "consumable", action: "therapistSession" }
+  },
+  {
+    id: "weekendGetaway",
+    name: "Weekend Getaway",
+    description: "Two nights at a B&B in Traverse City. +30 sleep, -25 stress. Consumable.",
+    cost: 350,
+    category: "consumable",
+    effect: { type: "consumable", action: "weekendGetaway" }
+  },
+  {
+    id: "flowersForSpouse",
+    name: "Flowers for Spouse",
+    description: "A dozen roses from Eastern Market. Reduces work-family tension. Consumable.",
+    cost: 75,
+    category: "consumable",
+    effect: { type: "consumable", action: "flowersForSpouse" }
+  },
+  {
+    id: "giftsForKids",
+    name: "Gifts for the Kids",
+    description: "Lego set and art supplies. Your kids remember you exist. -5 stress. Consumable.",
+    cost: 120,
+    category: "consumable",
+    effect: { type: "consumable", action: "giftsForKids" }
   }
 ];
 
