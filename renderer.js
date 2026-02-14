@@ -244,10 +244,11 @@ const defaultState = () => ({
     lifetimeEarnings: 0    // Total money across all runs (used for multiplier calc)
   },
 
-  // Work/family choice spiral
+  // Work/family relationship meter
+  relationship: 100,       // 0-100: family relationship health (100=happy, 0=divorced)
   workChoices: 0,          // Consecutive times player chose work over family
   familyChoices: 0,        // Consecutive times player chose family over work
-  divorced: false,         // Triggered by sustained work choices
+  divorced: false,         // Triggered when relationship hits 0
   burnout: false,          // Triggered by extreme work choices — permanent productivity penalty until recovery
   burnoutUntil: 0,         // Timestamp when burnout wears off
 
@@ -623,31 +624,35 @@ function applyConsumable(item) {
       break;
     case "therapistSession":
       state.stats.stress = clamp(state.stats.stress - 20, 0, 100);
+      state.relationship = clamp((state.relationship || 0) + 8, 0, 100);
       state.workChoices = Math.max(0, state.workChoices - 1);
-      log("Dr. Feldman listened. Really listened. Stress down, and something feels lighter.");
+      log("Dr. Feldman listened. Really listened. Stress down, and something feels lighter. (+8 family)");
       break;
     case "weekendGetaway":
       state.stats.sleep = clamp(state.stats.sleep + 30, 0, 100);
       state.stats.stress = clamp(state.stats.stress - 25, 0, 100);
-      log("Traverse City. Lake views. No Wi-Fi. You feel human again.");
+      state.relationship = clamp((state.relationship || 0) + 12, 0, 100);
+      log("Traverse City. Lake views. No Wi-Fi. You feel human again. (+12 family)");
       break;
     case "flowersForSpouse":
       if (state.divorced) {
         state.stats.stress = clamp(state.stats.stress + 5, 0, 100);
         log("You bought flowers for… nobody. The vase sits on an empty kitchen table.");
       } else {
+        state.relationship = clamp((state.relationship || 0) + 15, 0, 100);
         state.workChoices = Math.max(0, state.workChoices - 2);
         state.stats.stress = clamp(state.stats.stress - 5, 0, 100);
-        log(`Roses from Eastern Market. Your ${pn("wife", "husband")} smiled for the first time in weeks.`);
+        log(`Roses from Eastern Market. Your ${pn("wife", "husband")} smiled for the first time in weeks. (+15 family)`);
       }
       break;
     case "giftsForKids":
+      state.relationship = clamp((state.relationship || 0) + 10, 0, 100);
       state.workChoices = Math.max(0, state.workChoices - 1);
       state.stats.stress = clamp(state.stats.stress - 5, 0, 100);
       if (state.divorced) {
-        log(`Dropped off gifts at the house. Your ${pn("daughter", "son")} ran to the door. That look on ${pn("her", "his")} face was worth everything.`);
+        log(`Dropped off gifts at the house. Your ${pn("daughter", "son")} ran to the door. That look on ${pn("her", "his")} face was worth everything. (+10 family)`);
       } else {
-        log("Lego set and art supplies. Your kids built something they called 'Daddy's Office.' You laughed. Then you didn't.");
+        log("Lego set and art supplies. Your kids built something they called 'Daddy's Office.' You laughed. Then you didn't. (+10 family)");
       }
       break;
     default:
@@ -1038,6 +1043,22 @@ function clearFinishedTasks() {
 function choseWork() {
   state.workChoices += 1;
   state.familyChoices = 0;
+
+  // Relationship damage scales with consecutive work choices
+  // First choice: -8, second: -12, third: -15, etc. (accelerating)
+  const damage = 8 + state.workChoices * 4;
+  state.relationship = clamp((state.relationship || 100) - damage, 0, 100);
+
+  // Threshold warnings
+  const rel = state.relationship;
+  if (rel <= 75 && rel > 50 && state.workChoices === 1) {
+    log(`Your ${pn("wife", "husband")} left a note on the counter: "We need to talk." You didn't read it until midnight.`);
+  } else if (rel <= 50 && rel > 25) {
+    log(`Your ${pn("wife", "husband")} has stopped asking when you'll be home. That's worse than fighting.`);
+  } else if (rel <= 25 && rel > 0 && !state.divorced) {
+    log(`Separation papers are on the kitchen table. This is not a drill.`);
+  }
+
   checkWorkSpiral();
 }
 
@@ -1045,6 +1066,15 @@ function choseWork() {
 function choseFamily() {
   state.familyChoices += 1;
   state.workChoices = 0;
+
+  // Relationship heals — but slowly. It's harder to rebuild than to destroy.
+  const heal = state.divorced ? 2 : (6 + Math.min(state.familyChoices * 2, 10));
+  state.relationship = clamp((state.relationship || 100) + heal, 0, 100);
+
+  if (!state.divorced && state.relationship > 50 && state.relationship <= 58) {
+    log(`A quiet dinner together. Not everything is fixed, but something shifted. Your ${pn("wife", "husband")} reached across the table.`);
+  }
+
   // Choosing family during burnout speeds recovery (shave 12 hours off)
   if (state.burnout && state.burnoutUntil > now()) {
     state.burnoutUntil -= 1000 * 60 * 60 * 12;
@@ -1054,16 +1084,17 @@ function choseFamily() {
 }
 
 function checkWorkSpiral() {
-  // Divorce at 5 consecutive work choices
-  if (state.workChoices >= 5 && !state.divorced) {
+  // Divorce triggers when relationship hits 0 (graduated, not binary)
+  if (state.relationship <= 0 && !state.divorced) {
     state.divorced = true;
+    state.relationship = 0;
     state.stats.stress = clamp(state.stats.stress + 25, 0, 100);
     log(`Your ${pn("wife", "husband")} filed for divorce. The papers arrived between two billing statements.`);
     log("Stress permanently elevated. Was it worth it?");
   }
 
-  // Burnout at 8 consecutive work choices (or 4 after divorce)
-  const burnoutThreshold = state.divorced ? 4 : 8;
+  // Burnout at 4+ consecutive work choices when divorced, 6+ when not
+  const burnoutThreshold = state.divorced ? 4 : 6;
   if (state.workChoices >= burnoutThreshold && !state.burnout) {
     state.burnout = true;
     state.burnoutUntil = now() + 1000 * 60 * 60 * randInt(48, 96); // 2-4 days
@@ -2456,6 +2487,21 @@ function tick(dtMs) {
 
   if (state.office.walkingPadOn) state.stats.stress = clamp(state.stats.stress - 0.35 * dtHours, 0, 100);
 
+  // Passive relationship decay: neglect erodes relationships slowly
+  // ~0.15/hr when working (queue has items), ~0.05/hr when idle
+  if (!state.divorced) {
+    const relDecay = state.queue.length > 0 ? 0.15 : 0.05;
+    state.relationship = clamp((state.relationship || 100) - relDecay * dtHours, 0, 100);
+    // Auto-trigger divorce if meter hits 0 passively
+    if (state.relationship <= 0) {
+      state.divorced = true;
+      state.relationship = 0;
+      state.stats.stress = clamp(state.stats.stress + 25, 0, 100);
+      log(`Your ${pn("wife", "husband")} filed for divorce. The papers arrived between two billing statements.`);
+      log("Stress permanently elevated. Was it worth it?");
+    }
+  }
+
   // Divorce: stress floor at 25 (can never fully relax)
   if (state.divorced && state.stats.stress < 25) {
     state.stats.stress = 25;
@@ -2635,12 +2681,43 @@ function renderStats() {
   setBar("bar-hunger", s.hunger);
   setBar("bar-caffeine", s.caffeine);
   setBar("bar-sleep", s.sleep);
-  setBar("bar-stress", 100 - s.stress); // invert for “bad”
+  setBar("bar-stress", 100 - s.stress); // invert for "bad"
+
+  const rel = state.relationship != null ? state.relationship : 100;
+  setBar("bar-relationship", rel);
 
   $("val-hunger").textContent = Math.round(s.hunger);
   $("val-caffeine").textContent = Math.round(s.caffeine);
   $("val-sleep").textContent = Math.round(s.sleep);
   $("val-stress").textContent = Math.round(s.stress);
+
+  // Relationship value with status label
+  const relEl = $("val-relationship");
+  if (state.divorced) {
+    relEl.textContent = "OVER";
+    relEl.style.color = "#ff6f6f";
+  } else if (rel <= 25) {
+    relEl.textContent = Math.round(rel);
+    relEl.style.color = "#ff6f6f";
+  } else if (rel <= 50) {
+    relEl.textContent = Math.round(rel);
+    relEl.style.color = "#f2d98a";
+  } else {
+    relEl.textContent = Math.round(rel);
+    relEl.style.color = "";
+  }
+
+  // Dynamic bar color based on relationship health
+  const relBar = $("bar-relationship");
+  if (state.divorced) {
+    relBar.style.background = "#3a1a1a";
+  } else if (rel <= 25) {
+    relBar.style.background = "#ff6f6f";
+  } else if (rel <= 50) {
+    relBar.style.background = "#f2d98a";
+  } else {
+    relBar.style.background = "#ff6fb3";
+  }
 
   $("points").textContent = "$" + Math.floor(state.money).toString();
   $("billables").textContent = Math.floor(state.billables).toString();
@@ -4407,6 +4484,7 @@ function init() {
   if (state.workChoices === undefined) state.workChoices = 0;
   if (state.familyChoices === undefined) state.familyChoices = 0;
   if (state.divorced === undefined) state.divorced = false;
+  if (state.relationship === undefined) state.relationship = state.divorced ? 0 : 100;
   if (state.burnout === undefined) state.burnout = false;
   if (state.burnoutUntil === undefined) state.burnoutUntil = 0;
   if (!state.npcs) state.npcs = [];
