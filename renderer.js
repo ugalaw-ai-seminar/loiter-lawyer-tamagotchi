@@ -285,6 +285,26 @@ const defaultState = () => ({
     regBoostUntil: 0,       // Timestamp: regulatory productivity boost active until
     gamesPlayed: 0,         // Total minigames played
     gamesWon: 0             // Total minigames won
+  },
+
+  // Recurring NPC arcs — evolve bi-weekly
+  npcArcs: {
+    deliveryGuy: {
+      stage: 0,             // 0-5: DoorDash bags → moped → food truck
+      lastAdvancedAt: 0     // Timestamp of last stage advance
+    },
+    janitor: {
+      stage: 0,             // 0-5: retirement talk → last day → new guy (Tony)
+      lastAdvancedAt: 0,
+      retired: false,       // true after janitor leaves
+      tonySnapped: false    // true after Tony learns about the affair
+    },
+    secretary: {
+      stage: 0,             // 0-5: subtle hints → escalation → Christmas blowup
+      lastAdvancedAt: 0,
+      affairPublic: false,  // true after Christmas party incident
+      flirtedWithPlayer: false
+    }
   }
 });
 
@@ -2258,16 +2278,7 @@ const OFFICE_NPCS = [
       { label: "Take your mail and go", effect: { stress: -1 }, msg: "'See you tomorrow, chief.' Gerald's the most consistent person in your life." }
     ]
   },
-  // Delivery person (tied to ordering food)
-  {
-    name: "Marcus (DoorDash)",
-    persona: "delivery",
-    desc: "Your regular delivery driver. Knows the building code, your floor, and your usual order.",
-    interactions: [
-      { label: "Chat for a minute", effect: { hunger: 15, stress: -5 }, msg: "Marcus asked how you were. He meant it. That hit different at 10 PM." },
-      { label: "Grab the bag and go", effect: { hunger: 15, stress: -1 }, msg: "Marcus shouted 'have a good night!' as the elevator closed. You didn't." }
-    ]
-  },
+  // Marcus (DoorDash) — replaced by arc version in deliveryGuyNpc()
   {
     name: "Soo-Yun (Uber Eats)",
     persona: "delivery",
@@ -2279,18 +2290,372 @@ const OFFICE_NPCS = [
   }
 ];
 
-function spawnNpc() {
-  const pool = isSummerSeason() ? SUMMER_ASSOCIATES : OFFICE_NPCS;
+// ---- Recurring NPC Arcs ----
+// Each arc has staged NPC definitions that evolve bi-weekly.
+// Arc NPCs override their generic counterparts (Marcus replaces generic Marcus, etc.)
 
-  // Filter out NPCs already present
-  const activeNames = state.npcs.map(n => n.name);
-  const available = pool.filter(n => !activeNames.includes(n.name));
-  if (available.length === 0) return null;
+const TWO_WEEKS = 1000 * 60 * 60 * 24 * 14;
 
-  const template = randChoice(available);
-  // Pick one interaction pair for this visit
+function arcStage(arcName) {
+  return (state.npcArcs && state.npcArcs[arcName]) ? state.npcArcs[arcName].stage : 0;
+}
+
+// Delivery Guy arc: Marcus grows from DoorDash driver to food entrepreneur
+function deliveryGuyNpc() {
+  const s = arcStage("deliveryGuy");
+  const stages = [
+    // Stage 0: Baseline (same as original Marcus)
+    {
+      name: "Marcus (DoorDash)",
+      persona: "delivery",
+      desc: "Your regular delivery driver. Knows the building code, your floor, and your usual order.",
+      interactions: [
+        { label: "Chat for a minute", effect: { hunger: 15, stress: -5 }, msg: "Marcus asked how you were. He meant it. That hit different at 10 PM." },
+        { label: "Grab the bag and go", effect: { hunger: 15, stress: -1 }, msg: "Marcus shouted 'have a good night!' as the elevator closed. You didn't." }
+      ]
+    },
+    // Stage 1: More orders, busier
+    {
+      name: "Marcus (DoorDash)",
+      persona: "delivery",
+      desc: "Your regular guy. His bag is stuffed with three other orders tonight. Business is picking up.",
+      interactions: [
+        { label: "Ask how business is going", effect: { hunger: 15, stress: -5 }, msg: "'Can't complain. Got like eight regulars now on this block alone.' Marcus grinned. He looked tired but happy." },
+        { label: "Take the food quickly", effect: { hunger: 15, stress: -1 }, msg: "Marcus was already halfway down the hall. Three more stops tonight." }
+      ]
+    },
+    // Stage 2: He's upgraded to a moped
+    {
+      name: "Marcus (Moped Marcus)",
+      persona: "delivery",
+      desc: "Marcus ditched the Civic. He's on a moped now—helmet and everything. Faster deliveries.",
+      interactions: [
+        { label: "Compliment the moped", effect: { hunger: 15, stress: -6 }, msg: "'Got it off Craigslist. Cuts my delivery time in half.' He patted the helmet like a pet. 'Thinking about going independent.'" },
+        { label: "Take the order", effect: { hunger: 15, stress: -1 }, msg: "You heard the moped putt away as the elevator doors closed. He's going places. Literally." }
+      ]
+    },
+    // Stage 3: He's gone independent — "Marcus Eats"
+    {
+      name: "Marcus (Marcus Eats)",
+      persona: "delivery",
+      desc: "Marcus quit DoorDash. He's running his own delivery service now. The bag says 'MARCUS EATS' in Sharpie.",
+      interactions: [
+        { label: "Subscribe to Marcus Eats", effect: { hunger: 20, stress: -7, points: -10 }, msg: "'$10/week, I bring you whatever's good.' You're his first subscriber. The jerk chicken was incredible." },
+        { label: "Wish him luck", effect: { hunger: 15, stress: -3 }, msg: "'Appreciate you. For real.' Marcus fist-bumped you. You felt something you hadn't in months: hope for someone." }
+      ]
+    },
+    // Stage 4: Food truck parked outside
+    {
+      name: "Marcus (Food Truck)",
+      persona: "delivery",
+      desc: "There's a food truck outside the building now. 'MARCUS EATS' in bright yellow. The line is six deep.",
+      interactions: [
+        { label: "Eat at the truck", effect: { hunger: 25, stress: -8 }, msg: "Jerk chicken bowl with plantains. The associates are all eating here now. Marcus waved from behind the window. 'The usual?'" },
+        { label: "Wave from the lobby", effect: { hunger: 10, stress: -2 }, msg: "Marcus was too busy to chat. He had employees now. Two of them. You felt weirdly proud." }
+      ]
+    },
+    // Stage 5: Marcus is thriving — he employs people, the truck has a line
+    {
+      name: "Marcus (Marcus Eats LLC)",
+      persona: "delivery",
+      desc: "Marcus Eats is a real business now. Two trucks. A website. He still delivers to your floor personally sometimes.",
+      interactions: [
+        { label: "Catch up with Marcus", effect: { hunger: 20, stress: -10 }, msg: "'I'm hiring my third driver next week.' He sat down for a minute. 'You know, you were the first person in this building who ever asked how I was doing.' You didn't know what to say." },
+        { label: "Order from the app", effect: { hunger: 25, stress: -3 }, msg: "The app has a rating system. Marcus Eats: 4.9 stars. You left a five-star review. 'Best jerk chicken in the city.'" }
+      ]
+    }
+  ];
+  return stages[Math.min(s, stages.length - 1)];
+}
+
+// Janitor arc: Earl mentions retirement, eventually leaves, replaced by Tony (secretary's husband)
+function janitorNpc() {
+  const s = arcStage("janitor");
+  const arc = state.npcArcs && state.npcArcs.janitor;
+  const retired = arc && arc.retired;
+  const tonySnapped = arc && arc.tonySnapped;
+  const affairPublic = state.npcArcs && state.npcArcs.secretary && state.npcArcs.secretary.affairPublic;
+
+  // After Earl retires, Tony (the replacement) becomes the janitor NPC
+  if (retired) {
+    if (tonySnapped) {
+      // Post-blowup Tony
+      return {
+        name: "Tony Moretti",
+        persona: "staff",
+        desc: "The new janitor. He doesn't talk much anymore. Mops with a ferocity that concerns you.",
+        interactions: [
+          { label: "Ask if he's okay", effect: { stress: 3 }, msg: "'I'm fine.' He was not fine. The mop handle creaked under his grip." },
+          { label: "Give him space", effect: { stress: -1 }, msg: "You stepped around the wet floor sign. Some things you can't fix." }
+        ]
+      };
+    }
+    if (affairPublic) {
+      // Tony just found out
+      return {
+        name: "Tony Moretti",
+        persona: "staff",
+        desc: "The janitor. He's been staring at the supply closet door for ten minutes. Something's wrong.",
+        interactions: [
+          { label: "Try to talk to him", effect: { stress: 5 }, msg: "'Did you know?' He turned to you with red eyes. 'About Vanessa and...' He couldn't finish. You wished you hadn't asked." },
+          { label: "Walk away quietly", effect: { stress: 2 }, msg: "You heard something break in the supply closet five minutes later. Nobody went to check." }
+        ]
+      };
+    }
+    // Normal Tony (pre-affair revelation)
+    return {
+      name: "Tony Moretti",
+      persona: "staff",
+      desc: "The new janitor. Young guy, eager. Married to Vanessa from legal. Always whistling.",
+      interactions: [
+        { label: "Welcome him", effect: { stress: -4 }, msg: "'Thanks! Earl left big shoes to fill.' Tony grinned. 'Vanessa said this place is like family.' He seemed genuinely happy." },
+        { label: "Nod hello", effect: { stress: -1 }, msg: "Tony whistled his way down the hall. Optimism. How long would that last here?" }
+      ]
+    };
+  }
+
+  // Pre-retirement Earl stages
+  const stages = [
+    // Stage 0: Just the janitor
+    {
+      name: "Earl Jessup",
+      persona: "staff",
+      desc: "The janitor. Has worked here longer than most of the partners. Quiet. Thorough. Invisible to most people.",
+      interactions: [
+        { label: "Say good morning", effect: { stress: -4 }, msg: "'Mornin'.' Earl nodded. Brief. Warm. He's been saying that same greeting for 28 years." },
+        { label: "Walk past", effect: { stress: -1 }, msg: "Earl kept mopping. He didn't take it personally. He never did." }
+      ]
+    },
+    // Stage 1: Mentions retirement
+    {
+      name: "Earl Jessup",
+      persona: "staff",
+      desc: "The janitor. He mentioned something about 'one more winter' last time you talked.",
+      interactions: [
+        { label: "Ask about retirement plans", effect: { stress: -5 }, msg: "'Thinking about it. Fishing up in Traverse City. Maybe finally read a book that isn't a cleaning manual.' Earl smiled. It was the most he'd ever said to you." },
+        { label: "Just wave", effect: { stress: -1 }, msg: "Earl waved back with a soapy glove. Same as always. But you noticed his pace was slower." }
+      ]
+    },
+    // Stage 2: Counting down
+    {
+      name: "Earl Jessup",
+      persona: "staff",
+      desc: "The janitor. He's got a countdown calendar taped inside his supply closet. 47 days.",
+      interactions: [
+        { label: "Peek at the countdown", effect: { stress: -3 }, msg: "'Don't tell HR.' Earl grinned. 47 days drawn in red marker. Each one crossed off with a satisfying X." },
+        { label: "Pretend you didn't see it", effect: { stress: -1 }, msg: "You knew. He knew you knew. There was a mutual respect in the silence." }
+      ]
+    },
+    // Stage 3: Training the replacement
+    {
+      name: "Earl Jessup",
+      persona: "staff",
+      desc: "Earl's training a new guy. Young fella named Tony—married to Vanessa from legal, apparently.",
+      interactions: [
+        { label: "Meet Tony", effect: { stress: -4 }, msg: "'This is Tony. He's good people.' Earl clapped Tony on the back. Tony looked nervous but eager. 'Vanessa—my wife—she works upstairs in legal.' Small world." },
+        { label: "Nod to both", effect: { stress: -1 }, msg: "Earl was showing Tony the boiler room. Passing the torch. You felt time moving." }
+      ]
+    },
+    // Stage 4: Last week
+    {
+      name: "Earl Jessup",
+      persona: "staff",
+      desc: "Earl's last week. Someone put a card in the break room. Only six people signed it.",
+      interactions: [
+        { label: "Sign the card", effect: { stress: -6 }, msg: "You wrote something real. Earl read it later and left a clean mug on your desk the next morning. No note." },
+        { label: "You'll catch him later", effect: { stress: 2 }, msg: "You didn't catch him later." }
+      ]
+    },
+    // Stage 5: Gone (triggers retirement flag)
+    {
+      name: "Earl Jessup",
+      persona: "staff",
+      desc: "Earl's supply closet is empty. There's a faint smell of Pine-Sol and something like nostalgia.",
+      interactions: [
+        { label: "Linger by the closet", effect: { stress: -2 }, msg: "The new cleaning schedule was taped to the door in unfamiliar handwriting. 28 years, and the building didn't even pause." },
+        { label: "Move on", effect: { stress: -1 }, msg: "You moved on. That's what this place teaches you." }
+      ]
+    }
+  ];
+  return stages[Math.min(s, stages.length - 1)];
+}
+
+// Secretary arc: Vanessa Moretti — affair with partner Richard Halloway III
+function secretaryNpc() {
+  const s = arcStage("secretary");
+  const arc = state.npcArcs && state.npcArcs.secretary;
+  const affairPublic = arc && arc.affairPublic;
+  const isMidlevel = rankIndex() >= 1;
+
+  if (affairPublic) {
+    // Post-Christmas party fallout
+    return {
+      name: "Vanessa Moretti",
+      persona: "staff",
+      desc: "The legal secretary. She's been 'working from the annex' since the Christmas party. The desk is conspicuously clean.",
+      interactions: [
+        { label: "Check if she's okay", effect: { stress: 3 }, msg: "Her voicemail is full. Linda from reception said she saw moving boxes in Richard's office too. The fallout is still falling." },
+        { label: "Avoid the topic", effect: { stress: -1 }, msg: "Everyone is avoiding the topic. The whole floor has the energy of a funeral where nobody died but something did." }
+      ]
+    };
+  }
+
+  const stages = [
+    // Stage 0: Normal secretary
+    {
+      name: "Vanessa Moretti",
+      persona: "staff",
+      desc: "Legal secretary. Efficient, professional, always has a coffee. Married to Tony, the new maintenance hire.",
+      interactions: [
+        { label: "Ask her to pull a file", effect: { points: 20, stress: -2 }, msg: "Done before you finished the sentence. Vanessa is terrifyingly efficient." },
+        { label: "Just say hi", effect: { stress: -1 }, msg: "Vanessa smiled politely and went back to typing at 90 words per minute." }
+      ]
+    },
+    // Stage 1: First hint — she's staying late, mentions partner "needs things"
+    {
+      name: "Vanessa Moretti",
+      persona: "staff",
+      desc: "Legal secretary. She's been staying late a lot. 'Richard needs the quarterly briefs restructured,' she said. Richard doesn't do quarterly briefs.",
+      interactions: [
+        { label: "Ask why she's staying late", effect: { stress: -2 }, msg: "'Oh, you know how partners are. Always last-minute requests.' She tucked her hair behind her ear and changed the subject. Fast." },
+        { label: "Don't pry", effect: { stress: -1 }, msg: "None of your business. But Linda raised an eyebrow when you walked past." }
+      ]
+    },
+    // Stage 2: More obvious — perfume, closed-door meetings
+    {
+      name: "Vanessa Moretti",
+      persona: "staff",
+      desc: "Legal secretary. New perfume. You've noticed Richard Halloway's door is closed more often when she's 'delivering documents.'",
+      interactions: [
+        { label: "Make an observation", effect: { stress: 2 }, msg: "'Delivering documents' took 45 minutes. Richard's door had been locked. You and Linda exchanged a look that said everything." },
+        { label: "Mind your own business", effect: { stress: -1 }, msg: "You have 2,000 billable hours to worry about. Other people's choices are their problem." }
+      ]
+    },
+    // Stage 3: Office gossip spreading — Linda knows, Derek knows
+    {
+      name: "Vanessa Moretti",
+      persona: "staff",
+      desc: "Legal secretary. The rumor mill is in full production. Derek Liu asked you if you'd 'heard about Richard and Vanessa' in the elevator.",
+      interactions: isMidlevel ? [
+        { label: "Shut down the gossip", effect: { stress: -3, repCorp: 2 }, msg: "'Not my circus.' Derek nodded, but his eyes said he was definitely telling Amara next." },
+        { label: "Ask what Derek heard", effect: { stress: 3 }, msg: "'Dude. Everyone knows. The only person who doesn't know is Tony.' Derek looked genuinely uncomfortable." }
+      ] : [
+        { label: "Keep your head down", effect: { stress: -2 }, msg: "Junior associates don't get involved in partner drama. That's a survival skill." },
+        { label: "Ask Linda", effect: { stress: 2 }, msg: "Linda lowered her voice. 'Honey, I've known since week two. That woman wears guilt like perfume.' She wasn't wrong." }
+      ]
+    },
+    // Stage 4: Pre-Christmas — tension building, flirting if midlevel
+    {
+      name: "Vanessa Moretti",
+      persona: "staff",
+      desc: isMidlevel
+        ? "Legal secretary. She's been finding excuses to stop by your office. 'Wanted to make sure you got the memo.' There was no memo."
+        : "Legal secretary. She looks stressed lately. Tony stopped by with lunch and she barely looked up.",
+      interactions: isMidlevel ? [
+        { label: "Flirt back", effect: { stress: -4, relationship: -5 }, msg: "She laughed at something that wasn't funny and touched your arm. You felt flattered and immediately guilty." },
+        { label: "Keep it professional", effect: { stress: -1, repCorp: 1 }, msg: "'Thanks for the memo, Vanessa.' She held eye contact a beat too long, then left. Smart choice." }
+      ] : [
+        { label: "Ask if she's okay", effect: { stress: 1 }, msg: "'Fine. Everything's fine.' She smiled, but it didn't reach her eyes. Tony waved at you from the hallway, oblivious." },
+        { label: "Leave her be", effect: { stress: -1 }, msg: "Some people don't want help. They want to not get caught." }
+      ]
+    },
+    // Stage 5: Christmas party is the trigger — handled in the party event itself
+    {
+      name: "Vanessa Moretti",
+      persona: "staff",
+      desc: "Legal secretary. The Christmas party is coming up. She's been avoiding Tony's calls. Richard booked a suite at the Westin 'for the after-party.'",
+      interactions: [
+        { label: "Warn her", effect: { stress: 4 }, msg: "'Everyone knows, Vanessa. Tony is going to find out.' She went pale. 'It's... it's not what you think.' It was exactly what you think." },
+        { label: "Stay out of it", effect: { stress: -1 }, msg: "The Christmas party is Thursday. Whatever happens, happens. You just hope Tony doesn't show up." }
+      ]
+    }
+  ];
+  return stages[Math.min(s, stages.length - 1)];
+}
+
+// Advance arc stages every two weeks (real time)
+function tickNpcArcs() {
+  if (!state.npcArcs) return;
+
+  const arcs = state.npcArcs;
+
+  // Delivery guy: stages 0-5
+  if (arcs.deliveryGuy.stage < 5) {
+    if (arcs.deliveryGuy.lastAdvancedAt === 0) {
+      arcs.deliveryGuy.lastAdvancedAt = state.createdAt;
+    }
+    if (now() - arcs.deliveryGuy.lastAdvancedAt >= TWO_WEEKS) {
+      arcs.deliveryGuy.stage++;
+      arcs.deliveryGuy.lastAdvancedAt = now();
+      const msgs = [
+        null, // stage 0→1
+        "You noticed Marcus's delivery bag was stuffed fuller than usual tonight.",
+        "Marcus pulled up on a moped. Business must be good.",
+        "Marcus's bag says 'MARCUS EATS' in Sharpie. He quit DoorDash.",
+        "There's a food truck parked outside the building. Bright yellow. The line is growing.",
+        "Marcus Eats has a website now. And employees. And a second truck."
+      ];
+      if (msgs[arcs.deliveryGuy.stage]) log(msgs[arcs.deliveryGuy.stage]);
+    }
+  }
+
+  // Janitor: stages 0-5, then retirement flag
+  if (!arcs.janitor.retired && arcs.janitor.stage < 5) {
+    if (arcs.janitor.lastAdvancedAt === 0) {
+      arcs.janitor.lastAdvancedAt = state.createdAt;
+    }
+    if (now() - arcs.janitor.lastAdvancedAt >= TWO_WEEKS) {
+      arcs.janitor.stage++;
+      arcs.janitor.lastAdvancedAt = now();
+      const msgs = [
+        null,
+        "Earl mentioned retirement today. Something about fishing and Traverse City.",
+        "Someone spotted a countdown calendar in Earl's supply closet. 47 days.",
+        "Earl's training a new guy—Tony Moretti. Married to Vanessa from legal.",
+        "There's a goodbye card for Earl in the break room. It's Earl's last week.",
+        "Earl Jessup has retired. 28 years. The supply closet smells like Pine-Sol and endings."
+      ];
+      if (msgs[arcs.janitor.stage]) log(msgs[arcs.janitor.stage]);
+      if (arcs.janitor.stage >= 5) {
+        arcs.janitor.retired = true;
+      }
+    }
+  }
+
+  // Secretary: stages 0-5
+  if (!arcs.secretary.affairPublic && arcs.secretary.stage < 5) {
+    if (arcs.secretary.lastAdvancedAt === 0) {
+      arcs.secretary.lastAdvancedAt = state.createdAt;
+    }
+    if (now() - arcs.secretary.lastAdvancedAt >= TWO_WEEKS) {
+      arcs.secretary.stage++;
+      arcs.secretary.lastAdvancedAt = now();
+      const msgs = [
+        null,
+        "Vanessa's been staying late a lot. Something about 'restructuring quarterly briefs' for Richard.",
+        "New perfume in the office. Richard Halloway's door has been closed more often than usual.",
+        "Derek Liu asked you in the elevator if you'd 'heard about Richard and Vanessa.' The rumor mill is spinning.",
+        "Vanessa's been finding reasons to walk past the associate offices. Tony brought her lunch today—she barely noticed.",
+        "The Christmas party is approaching. Vanessa hasn't been answering Tony's calls. Richard booked a hotel suite for the 'after-party.'"
+      ];
+      if (msgs[arcs.secretary.stage]) log(msgs[arcs.secretary.stage]);
+    }
+  }
+
+  // Tony's reaction: if affair is public and janitor arc has Tony installed, Tony snaps after 3 days
+  if (arcs.secretary.affairPublic && arcs.janitor.retired && !arcs.janitor.tonySnapped) {
+    if (!arcs.janitor._tonyFoundOutAt) {
+      arcs.janitor._tonyFoundOutAt = now();
+    }
+    if (now() - arcs.janitor._tonyFoundOutAt >= 1000 * 60 * 60 * 72) { // 3 days
+      arcs.janitor.tonySnapped = true;
+      log("Tony Moretti didn't come in today. When he did show up, he said four words to Richard Halloway in the lobby that made Barbara Kline spill her coffee. HR is involved.");
+    }
+  }
+}
+
+function npcFromTemplate(template) {
   const interaction = randChoice(template.interactions);
-
   return {
     id: Math.random().toString(36).slice(2),
     name: template.name,
@@ -2299,9 +2664,46 @@ function spawnNpc() {
     optA: { label: interaction.label, effect: interaction.effect, msg: interaction.msg },
     optB: { label: template.interactions.find(i => i !== interaction)?.label || "Ignore", effect: template.interactions.find(i => i !== interaction)?.effect || { stress: -1 }, msg: template.interactions.find(i => i !== interaction)?.msg || "You went about your day." },
     arrivedAt: now(),
-    expiresAt: now() + 1000 * 60 * 60 * randInt(6, 24), // Leaves after 6-24 hours
+    expiresAt: now() + 1000 * 60 * 60 * randInt(6, 24),
     interacted: false
   };
+}
+
+function spawnNpc() {
+  const activeNames = state.npcs.map(n => n.name);
+
+  // During summer, only summer associates (no arc NPCs)
+  if (isSummerSeason()) {
+    const available = SUMMER_ASSOCIATES.filter(n => !activeNames.includes(n.name));
+    if (available.length === 0) return null;
+    return npcFromTemplate(randChoice(available));
+  }
+
+  // Non-summer: mix arc NPCs with generic office NPCs
+  // Arc NPCs get ~40% spawn priority (weighted random)
+  const arcTemplates = [];
+  if (state.npcArcs) {
+    const dg = deliveryGuyNpc();
+    if (!activeNames.includes(dg.name)) arcTemplates.push(dg);
+    const jan = janitorNpc();
+    if (!activeNames.includes(jan.name)) arcTemplates.push(jan);
+    const sec = secretaryNpc();
+    if (!activeNames.includes(sec.name)) arcTemplates.push(sec);
+  }
+
+  // Filter generic pool to exclude arc NPC names (they're replaced by arc versions)
+  const arcNames = ["Marcus (DoorDash)", "Moped Marcus", "Marcus (Marcus Eats)", "Marcus (Food Truck)", "Marcus (Marcus Eats LLC)",
+                    "Earl Jessup", "Tony Moretti", "Vanessa Moretti", "Denise Kowalski"];
+  const genericPool = OFFICE_NPCS.filter(n => !activeNames.includes(n.name) && !arcNames.includes(n.name));
+
+  if (arcTemplates.length === 0 && genericPool.length === 0) return null;
+
+  // 40% chance to spawn arc NPC if available, else generic
+  if (arcTemplates.length > 0 && (genericPool.length === 0 || Math.random() < 0.4)) {
+    return npcFromTemplate(randChoice(arcTemplates));
+  }
+  if (genericPool.length === 0) return null;
+  return npcFromTemplate(randChoice(genericPool));
 }
 
 function interactNpc(npcId, choice) {
@@ -2320,6 +2722,7 @@ function interactNpc(npcId, choice) {
   if (eff.repLit) state.reputation.lit += eff.repLit;
   if (eff.repCorp) state.reputation.corp += eff.repCorp;
   if (eff.repReg) state.reputation.reg += eff.repReg;
+  if (eff.relationship) state.relationship = clamp((state.relationship || 100) + eff.relationship, 0, 100);
 
   log(opt.msg);
 }
@@ -2610,6 +3013,19 @@ function tick(dtMs) {
     state.stats.stress = clamp(state.stats.stress - 30, 0, 100);
     state.stats.sleep = clamp(state.stats.sleep + 10, 0, 100);
     log("Office Christmas party (Thursday before Christmas). Stress melts away—for one night.");
+
+    // Secretary arc climax: if Vanessa's arc has reached stage 5, the affair goes public at the party
+    if (state.npcArcs && state.npcArcs.secretary && state.npcArcs.secretary.stage >= 5 && !state.npcArcs.secretary.affairPublic) {
+      state.npcArcs.secretary.affairPublic = true;
+      state.stats.stress = clamp(state.stats.stress + 15, 0, 100);
+      log("The eggnog was flowing. Richard Halloway and Vanessa Moretti were not discreet.");
+      log("Someone took a photo. It was on the associate group chat in eleven seconds.");
+      log("Barbara Kline's face could have frozen Lake Michigan. 'My office. Monday. Both of you.'");
+      if (state.npcArcs.janitor && state.npcArcs.janitor.retired) {
+        log("Tony wasn't at the party. But he'll hear about it. Everyone will hear about it.");
+      }
+    }
+
     state.nextChristmasPartyAt = nextChristmasPartyTimestamp(now());
   }
 
@@ -2620,6 +3036,7 @@ function tick(dtMs) {
   tickJuniors(dtHours);
   tickRival(dtHours);
   tickNpcs(dtHours);
+  tickNpcArcs();
   tickBitcoin(dtHours);
 
   if (state.pipStrikes >= 3) {
@@ -4487,6 +4904,29 @@ function init() {
   if (state.relationship === undefined) state.relationship = state.divorced ? 0 : 100;
   if (state.burnout === undefined) state.burnout = false;
   if (state.burnoutUntil === undefined) state.burnoutUntil = 0;
+
+  // NPC arc migration
+  if (!state.npcArcs) {
+    // Estimate arc stage based on game age (catch up old saves)
+    const gameAgeWeeks = (now() - state.createdAt) / (1000 * 60 * 60 * 24 * 7);
+    const biweeksElapsed = Math.floor(gameAgeWeeks / 2);
+    const catchupStage = Math.min(biweeksElapsed, 5);
+    state.npcArcs = {
+      deliveryGuy: { stage: catchupStage, lastAdvancedAt: now() },
+      janitor: {
+        stage: catchupStage,
+        lastAdvancedAt: now(),
+        retired: catchupStage >= 5,
+        tonySnapped: false
+      },
+      secretary: {
+        stage: catchupStage,
+        lastAdvancedAt: now(),
+        affairPublic: false,
+        flirtedWithPlayer: false
+      }
+    };
+  }
   if (!state.npcs) state.npcs = [];
   if (!state.nextNpcSpawnAt) state.nextNpcSpawnAt = 0;
   if (state.apiConfig === undefined) state.apiConfig = null;
