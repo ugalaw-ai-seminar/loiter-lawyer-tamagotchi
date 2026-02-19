@@ -2,19 +2,10 @@
 // Fetches store catalog and handles purchases via remote API.
 // Falls back to built-in items when no API is configured or the API is unreachable.
 //
-// Configuration (two options, in-app takes priority):
-//   1. In-app: Use setConfig({ apiBase, apiKey }) from the renderer
-//   2. File:   Create ~/.biglaw-sim/store-config.json with:
-//              { "apiBase": "https://your-api.com/api", "apiKey": "your-key-here" }
-//
-// If neither is set, the built-in catalog is used (no error shown).
+// Configuration: Use setConfig({ apiBase, apiKey }) from the renderer.
+// If not set, the built-in catalog is used (no error shown).
 
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
-
-const CONFIG_FILE = path.join(os.homedir(), ".biglaw-sim", "store-config.json");
-
+(function() {
 const BUILTIN_ITEMS = [
   {
     id: "hat",
@@ -184,23 +175,11 @@ function getConfig() {
 }
 
 /**
- * Resolve the active config. In-app config takes priority over file config.
+ * Resolve the active config.
  * Returns { apiBase, apiKey } or null if not configured.
  */
 function loadConfig() {
-  // In-app config takes priority
-  if (_inAppConfig) return _inAppConfig;
-
-  // Fall back to file-based config
-  try {
-    if (!fs.existsSync(CONFIG_FILE)) return null;
-    const raw = fs.readFileSync(CONFIG_FILE, "utf-8");
-    const cfg = JSON.parse(raw);
-    if (!cfg.apiBase) return null;
-    return { apiBase: cfg.apiBase.replace(/\/+$/, ""), apiKey: cfg.apiKey || "" };
-  } catch {
-    return null;
-  }
+  return _inAppConfig || null;
 }
 
 async function apiFetch(endpoint, options = {}) {
@@ -296,4 +275,5 @@ function isConfigured() {
   return loadConfig() !== null;
 }
 
-module.exports = { fetchCatalog, reportPurchase, invalidateCache, isConfigured, setConfig, getConfig, BUILTIN_ITEMS };
+window.storeApi = { fetchCatalog, reportPurchase, invalidateCache, isConfigured, setConfig, getConfig, BUILTIN_ITEMS };
+})();

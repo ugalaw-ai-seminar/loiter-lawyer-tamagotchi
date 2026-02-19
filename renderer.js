@@ -2,13 +2,9 @@
 // Real-time slow decay (hours/days), assignment queue, billables, rank, events, office interactions.
 // Persistence: JSON file in user home directory.
 
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
-const storeApi = require("./store-api");
+const storeApi = window.storeApi;
 
-const SAVE_DIR = path.join(os.homedir(), ".biglaw-sim");
-const SAVE_FILE = path.join(SAVE_DIR, "save.json");
+const SAVE_KEY = "biglaw-sim-save";
 
 const $ = (id) => document.getElementById(id);
 
@@ -345,8 +341,7 @@ function renderLog() {
 
 function save() {
   try {
-    if (!fs.existsSync(SAVE_DIR)) fs.mkdirSync(SAVE_DIR, { recursive: true });
-    fs.writeFileSync(SAVE_FILE, JSON.stringify(state), "utf-8");
+    localStorage.setItem(SAVE_KEY, JSON.stringify(state));
     log("Saved.");
   } catch (e) {
     log("Save failed: " + e.message);
@@ -354,8 +349,8 @@ function save() {
 }
 function load() {
   try {
-    if (!fs.existsSync(SAVE_FILE)) return null;
-    const raw = fs.readFileSync(SAVE_FILE, "utf-8");
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return null;
     const s = JSON.parse(raw);
     if (!s.stats || !s.lawyer) return null;
     return s;
@@ -4894,8 +4889,7 @@ function showCharacterCreation(onComplete) {
 // ---------- Boot ----------
 function saveSilent() {
   try {
-    if (!fs.existsSync(SAVE_DIR)) fs.mkdirSync(SAVE_DIR, { recursive: true });
-    fs.writeFileSync(SAVE_FILE, JSON.stringify(state), "utf-8");
+    localStorage.setItem(SAVE_KEY, JSON.stringify(state));
   } catch (_) { /* best effort */ }
 }
 
